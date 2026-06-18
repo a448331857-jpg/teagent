@@ -1,0 +1,8 @@
+LLM_API_MODE="chat-completions"
+LLM_API_URL="https://ark.cn-beijing.volces.com/api/v1/chat/completions"
+LLM_MODEL="你的模型或推理接入点 ID"
+LLM_MODEL_NAME="默认模型"
+LLM_API_KEY="你的 API Key"
+
+# 可选：使用一个 JSON 数组配置多个模型。配置后将优先于上面的单模型变量。
+# LLM_PROFILES='[{"id":"primary","name":"主模型","mode":"chat-completions","apiUrl":"https://example.com/v1/chat/completions","model":"model-id","apiKey":"secret"}]'

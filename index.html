@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#b91c1c" />
+    <meta name="description" content="面向 VC/PE、投行与行研团队的云端智能投研工作台" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <title>时代电气投研助手</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">TE</div>
+          <div class="brand-copy">
+            <strong>时代电气</strong>
+            <span>智能投研助手</span>
+          </div>
+          <button class="sidebar-toggle" id="sidebarToggleBtn" title="收起侧栏" aria-label="收起侧栏">‹</button>
+        </div>
+
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-item active" data-view="ask"><span class="nav-icon" data-icon="message"></span><span>Ask 奔奔</span></button>
+          <button class="nav-item" data-view="research"><span class="nav-icon" data-icon="spark"></span><span>投研助手</span></button>
+          <button class="nav-item" data-view="people"><span class="nav-icon" data-icon="person"></span><span>人物调查</span></button>
+          <button class="nav-item" data-view="sourcing"><span class="nav-icon" data-icon="search"></span><span>标的搜索</span></button>
+          <button class="nav-item" data-view="reports"><span class="nav-icon" data-icon="report"></span><span>报告中心</span></button>
+          <button class="nav-item" data-view="board"><span class="nav-icon" data-icon="bolt"></span><span>投资看板</span></button>
+          <button class="nav-item" data-view="favorites"><span class="nav-icon" data-icon="star"></span><span>历史收藏</span></button>
+          <button class="nav-item" data-view="tasks"><span class="nav-icon" data-icon="calendar"></span><span>定时任务</span></button>
+          <button class="nav-item" data-view="memory"><span class="nav-icon" data-icon="memory"></span><span>技能记忆</span></button>
+          <button class="nav-item" data-view="projects"><span class="nav-icon" data-icon="folder"></span><span>投资项目</span></button>
+          <button class="nav-item" data-view="history"><span class="nav-icon" data-icon="clock"></span><span>历史</span></button>
+          <button class="nav-item" data-view="settings"><span class="nav-icon" data-icon="settings"></span><span>模型设置</span></button>
+        </nav>
+
+        <div class="sidebar-block">
+          <div class="block-title">
+            <span>投资项目</span>
+            <button class="mini-link" data-view-jump="projects">查看全部</button>
+          </div>
+          <div id="sidebarProjects" class="sidebar-list"></div>
+        </div>
+
+        <div id="sidebarHistory" hidden></div>
+
+        <div class="sidebar-footer">
+          <div class="signal">
+            <span></span>
+            <div>
+              <strong>时代电气投研助手</strong>
+              <small>企业投研工作台</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">时代电气 · 市场投研管理工具</p>
+            <h1 id="viewTitle">Ask 奔奔</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="seedDemoBtn" title="载入演示数据" aria-label="载入演示数据">
+              <span class="button-icon" data-icon="database"></span>
+            </button>
+            <button class="primary-button" id="newResearchBtn"><span class="button-icon" data-icon="plus"></span>新建研究</button>
+          </div>
+        </header>
+
+        <section class="view active" id="askView" data-title="Ask 奔奔">
+          <section class="ask-workspace">
+            <aside class="conversation-sidebar">
+              <button class="primary-button conversation-new" id="newChatBtn"><span class="button-icon" data-icon="plus"></span>新建交流</button>
+              <label class="conversation-search"><span data-icon="search"></span><input id="conversationSearch" placeholder="搜索交流记录" /></label>
+              <div id="conversationList" class="conversation-list"></div>
+            </aside>
+            <div class="conversation-main">
+              <div class="ask-session-bar">
+                <div>
+                  <strong id="askSessionTitle">新交流</strong>
+                  <span id="askModelStatus">正在检查模型</span>
+                </div>
+                <div class="row-actions"><select id="askModelSelect" class="model-selector" title="选择本次对话使用的大模型"></select><button class="secondary-button" id="exportChatBtn"><span data-icon="download"></span>导出记录</button></div>
+              </div>
+              <div id="askChatMessages" class="chat-messages chat-messages-full"></div>
+              <div class="chat-composer chat-composer-full">
+                <textarea id="askChatInput" placeholder="输入研究问题，发送后自动形成一条交流记录..." rows="2"></textarea>
+                <div class="chat-composer-actions">
+                  <label class="chat-attach" title="添加文本资料"><input id="askChatFiles" type="file" multiple accept=".txt,.md,.csv,.json,.log" /><span>附件</span></label>
+                  <span id="askAttachmentHint" class="attachment-hint"></span>
+                  <button class="primary-button chat-send" id="askChatSendBtn">发送</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="researchView" data-title="投研助手">
+          <div class="research-shell">
+            <aside class="research-record-sidebar">
+              <h2>研究记录</h2>
+              <input id="researchRecordSearch" placeholder="搜索研究记录" />
+              <div id="researchRecordList"></div>
+            </aside>
+            <div class="research-workspace"><div class="work-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>提示词生成投研报告</h2>
+                  <p>描述研究要求、判断框架和交付标准，AI 将生成完整报告并沉淀到报告中心。</p>
+                </div>
+              </div>
+              <label class="prompt-field"><span>研究要求 / 提示词</span><textarea id="researchPromptInput" rows="7" placeholder="例如：分析轨道交通功率半导体行业，覆盖市场规模、产业链、竞争格局、核心公司、投资机会和主要风险；关键结论需要区分事实、推断和待核验项。"></textarea></label>
+              <div class="form-grid">
+                <label><span>研究赛道</span><input id="industryInput" type="text" value="人形机器人" /></label>
+                <label>
+                  <span>交付类型</span>
+                  <select id="deliverableInput">
+                    <option>投资备忘录</option>
+                    <option>行业研究报告</option>
+                    <option>投后月报</option>
+                    <option>退出分析</option>
+                    <option>敏感性分析</option>
+                  </select>
+                </label>
+                <label>
+                  <span>研究深度</span>
+                  <select id="depthInput">
+                    <option>快速扫描</option>
+                    <option selected>标准研究</option>
+                    <option>深度尽调前置</option>
+                  </select>
+                </label>
+                <label><span>关注重点</span><input id="focusInput" type="text" value="产业链、投资机会、风险、可跟进标的" /></label>
+              </div>
+              <div class="upload-zone">
+                <input id="researchFiles" type="file" multiple />
+                <span class="upload-icon" data-icon="upload"></span>
+                <strong>上传研报、新闻、访谈纪要或财务文本</strong>
+                <small>原型可直接解析 txt、md、csv、json；PDF/Word 先记录文件名，后续可接文档解析服务。</small>
+              </div>
+              <div class="file-chips" id="researchFileChips"></div>
+              <div class="agent-bar">
+                <button class="primary-button" id="runResearchBtn"><span class="button-icon" data-icon="play"></span>生成完整报告</button>
+                <button class="secondary-button" id="clearResearchBtn"><span class="button-icon" data-icon="refresh"></span>清空输入</button>
+              </div>
+            </section>
+            <section class="panel output-panel">
+              <div class="panel-header compact">
+                <h2>Agent 输出</h2>
+                <div class="segmented">
+                  <button class="active" data-output-tab="memo">备忘录</button>
+                  <button data-output-tab="map">产业链</button>
+                  <button data-output-tab="actions">行动项</button>
+                </div>
+              </div>
+              <div class="output-tabs">
+                <article class="output-tab active" id="memoOutput"></article>
+                <article class="output-tab" id="mapOutput"></article>
+                <article class="output-tab" id="actionsOutput"></article>
+              </div>
+              <div class="output-actions">
+                <button class="secondary-button" id="saveReportBtn"><span class="button-icon" data-icon="save"></span>保存报告</button>
+                <button class="secondary-button" id="exportReportBtn"><span class="button-icon" data-icon="download"></span>导出文档</button>
+              </div>
+            </section>
+            </div></div>
+          </div>
+        </section>
+
+        <section class="view" id="peopleView" data-title="人物调查">
+          <div class="people-shell">
+            <aside class="people-record-sidebar">
+              <h2>调查记录</h2>
+              <input id="peopleRecordSearch" placeholder="搜索人物或公司" />
+              <div id="peopleRecordList"></div>
+            </aside>
+            <div class="people-workspace"><div class="work-grid">
+            <section class="panel">
+              <div class="panel-header"><div><h2>创始人/高管调查</h2><p>生成背景梳理、关系网络、风险提示和访谈问题清单。</p></div></div>
+              <div class="form-grid">
+                <label><span>人物姓名</span><input id="personNameInput" value="张明" /></label>
+                <label><span>所在公司</span><input id="personCompanyInput" value="灵构机器人" /></label>
+                <label><span>角色</span><input id="personRoleInput" value="创始人兼 CEO" /></label>
+                <label><span>调查重点</span><input id="personFocusInput" value="履历真实性、融资历史、产业资源、潜在风险" /></label>
+              </div>
+              <textarea id="personNotesInput" placeholder="粘贴公开履历、访谈纪要、工商变更、媒体报道等文本。"></textarea>
+              <div class="agent-bar">
+                <button class="primary-button" id="runPeopleBtn"><span class="button-icon" data-icon="scan"></span>生成调查</button>
+                <button class="secondary-button" id="savePeopleBtn"><span class="button-icon" data-icon="save"></span>保存为报告</button>
+              </div>
+            </section>
+            <section class="panel output-panel"><div class="panel-header compact"><h2>调查结果</h2><span class="status-pill">人物画像</span></div><div id="peopleOutput" class="prose-output"></div></section>
+            </div></div>
+          </div>
+        </section>
+
+        <section class="view" id="sourcingView" data-title="标的搜索">
+          <div class="sourcing-shell">
+            <aside class="filter-sidebar"><h2>筛选</h2><input id="screeningSearch" placeholder="搜索已保存筛选" /><div id="savedScreeningList"></div></aside>
+            <section class="sourcing-main">
+              <div class="empty-hero" id="sourcingEmpty"><span data-icon="search"></span><h2>创建第一次筛选</h2><p>用自然语言描述你想找的公司，结果由 AI 驱动并标记待核验项。</p><button class="primary-button" id="openScreeningModalBtn"><span data-icon="plus"></span>新建筛选</button></div>
+              <div class="sourcing-result-head"><div><h2>筛选结果</h2><p id="screeningSummary">尚未执行筛选</p></div><div class="row-actions"><button class="secondary-button" id="exportScreeningBtn">导出 CSV</button><button class="secondary-button" id="newScreeningBtn">新建筛选</button></div></div>
+              <div class="company-grid" id="companyGrid"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="reportsView" data-title="报告中心">
+          <div class="panel">
+            <div class="panel-header">
+              <div><h2>报告中心</h2><p>管理 Word、Excel、PPT 类型报告，支持专业模板新建、编辑、收藏、下载和删除。</p></div>
+              <div class="topbar-actions">
+                <button class="primary-button" data-create-report="DOCX">+ 新建 Word</button>
+                <button class="primary-button" data-create-report="XLSX">+ 新建模型</button>
+                <button class="primary-button" data-create-report="PPTX">+ 新建 PPT</button>
+              </div>
+            </div>
+            <div class="report-top-tabs">
+              <button class="report-top-tab active" data-report-mode="mine">我的报告</button>
+              <button class="report-top-tab" data-report-mode="templates">模板管理</button>
+            </div>
+            <div class="tabs-row">
+              <button class="filter-tab active" data-report-filter="全部">全部</button>
+              <button class="filter-tab" data-report-filter="DOCX">Word</button>
+              <button class="filter-tab" data-report-filter="XLSX">EXCEL</button>
+              <button class="filter-tab" data-report-filter="PPTX">PPT</button>
+            </div>
+            <div id="reportCenterList" class="table-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="reportEditorView" data-title="报告编辑器">
+          <div class="editor-shell">
+            <section class="editor-main">
+              <div class="editor-head">
+                <button class="text-button" id="backToReportsBtn">‹ 返回</button>
+                <div class="editor-title-wrap">
+                  <input id="editorTitleInput" class="editor-title-input" value="投资备忘录（IC Memo）" />
+                  <div class="editor-meta">
+                    <span class="status-pill">已完成</span>
+                    <span id="editorFormatBadge" class="file-badge">DOCX</span>
+                    <span id="editorSavedAt">尚未保存</span>
+                  </div>
+                </div>
+                <div class="editor-actions">
+                  <button class="secondary-button" id="saveEditorBtn">已是最新</button>
+                  <button class="primary-button" id="exportEditorDocBtn">生成 DOCX</button>
+                  <button class="primary-button" id="exportEditorPptBtn">生成 PPT</button>
+                </div>
+              </div>
+
+              <div class="editor-toolbar">
+                <button data-editor-command="bold">B</button>
+                <button data-editor-command="italic">I</button>
+                <button data-editor-command="underline">U</button>
+                <button data-editor-command="formatBlock" data-command-value="H1">H1</button>
+                <button data-editor-command="formatBlock" data-command-value="H2">H2</button>
+                <button data-editor-command="formatBlock" data-command-value="H3">H3</button>
+                <button data-editor-command="insertUnorderedList">列表</button>
+                <button data-editor-command="insertOrderedList">1. 列表</button>
+                <button data-editor-command="formatBlock" data-command-value="BLOCKQUOTE">引用</button>
+                <button data-editor-command="insertTable">表格</button>
+                <button data-editor-command="undo">撤销</button>
+                <button data-editor-command="redo">重做</button>
+              </div>
+              <div id="reportEditor" class="report-editor" contenteditable="true"></div>
+            </section>
+
+            <aside class="eva-panel">
+              <div class="eva-title"><span></span><strong>奔奔活动</strong></div>
+              <div id="evaActivity" class="eva-activity">
+                <p>奔奔还没在工作</p>
+                <small>右下输入问题，过程会显示在这里</small>
+              </div>
+              <div class="eva-chat">
+                <strong>奔奔</strong>
+                <small>基于工作对话</small>
+                <textarea id="evaPromptInput" placeholder="选中文字后 Ask 奔奔，或直接输入问题"></textarea>
+                <button class="primary-button" id="askEvaInEditorBtn">Ask 奔奔</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="boardView" data-title="投资看板">
+          <div class="view-toolbar">
+            <div class="segmented"><button class="active" data-board-mode="kanban">看板</button><button data-board-mode="table">表格</button></div>
+            <div class="row-actions"><input id="boardSearchInput" class="compact-search" placeholder="按公司或行业搜索" /><button class="primary-button" data-view-jump="projects"><span data-icon="plus"></span>新建项目</button></div>
+          </div>
+          <div class="metrics-grid">
+            <article class="metric"><span>跟进项目</span><strong id="projectCount">0</strong><small>筛选、尽调、搁置</small></article>
+            <article class="metric"><span>报告沉淀</span><strong id="reportCount">0</strong><small>Word/Excel/PPT</small></article>
+            <article class="metric"><span>监控任务</span><strong id="taskCount">0</strong><small>每日/每周跟踪</small></article>
+            <article class="metric"><span>尽调风险</span><strong id="riskCount">0</strong><small>来自交叉核验</small></article>
+          </div>
+          <div class="dashboard-layout" id="boardKanbanView">
+            <section class="panel"><div class="panel-header"><div><h2>项目阶段看板</h2><p>按投前管理动作组织项目。</p></div></div><div class="kanban" id="projectBoard"></div></section>
+            <aside class="panel"><div class="panel-header compact"><h2>赛道分布</h2><button class="text-button" data-view-jump="sourcing">找标的</button></div><div id="sectorBoard" class="report-list"></div></aside>
+          </div>
+          <section class="panel board-table-panel" id="boardTableView" hidden><div class="table-scroll"><table class="investment-table"><thead><tr><th>公司名</th><th>行业</th><th>管道阶段</th><th>负责人</th><th>融资阶段</th><th>投资金额</th><th>股权</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="investmentTableBody"></tbody></table></div></section>
+        </section>
+
+        <section class="view" id="favoritesView" data-title="历史收藏">
+          <div class="panel">
+            <div class="panel-header"><div><h2>历史收藏</h2><p>收藏报告、奔奔回答、人物调查和重点项目，便于复盘。</p></div></div>
+            <div id="favoriteList" class="table-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="tasksView" data-title="定时任务">
+          <section class="automation-hero"><span data-icon="calendar"></span><h2>自动化你的投研工作</h2><p>选择模板快速开始，或从零创建自定义任务。</p></section>
+          <div class="automation-template-grid">
+            <button data-task-template="weekly"><span data-icon="report"></span><strong>每周行业动态</strong><small>每周自动生成指定行业最新动态摘要</small></button>
+            <button data-task-template="target"><span data-icon="scan"></span><strong>标的定时跟踪</strong><small>跟踪关注公司的融资、新闻和经营动态</small></button>
+            <button data-task-template="competitor"><span data-icon="search"></span><strong>竞品实时监控</strong><small>检查竞品公司公开信息变化</small></button>
+            <button data-task-template="financing"><span data-icon="bolt"></span><strong>投融资讯息</strong><small>追踪指定赛域或技术方向投资事件</small></button>
+            <button data-task-template="post"><span data-icon="shield"></span><strong>投后追踪</strong><small>跟踪被投企业运营、风险与关键指标</small></button>
+            <button class="dashed" data-task-template="custom"><span data-icon="plus"></span><strong>从零创建</strong><small>自定义 prompt、计划和输出方式</small></button>
+          </div>
+          <section class="automation-section"><div class="panel-header compact"><h2>任务列表</h2><span class="status-pill">可立即执行</span></div><div id="taskList" class="table-list"></div></section>
+          <section class="automation-section"><div class="panel-header compact"><h2>最近执行结果</h2></div><div id="taskResultList" class="task-result-list"></div></section>
+        </section>
+
+        <section class="view" id="memoryView" data-title="技能记忆">
+          <div class="work-grid">
+            <section class="panel">
+              <div class="panel-header"><div><h2>智能体 Skill 构建器</h2><p>描述希望智能体掌握的能力，AI 自动生成触发条件、执行步骤和输出规范。</p></div></div>
+              <label class="prompt-field"><span>想创建什么 Skill</span><textarea id="skillPromptInput" rows="5" placeholder="例如：创建一个轨道交通装备公司尽调 Skill，能够分析订单质量、客户集中度、技术壁垒和交付风险，并输出核验清单。"></textarea></label>
+              <div class="agent-bar"><button class="primary-button" id="generateSkillBtn"><span data-icon="spark"></span>AI 生成 Skill</button></div>
+              <div class="section-divider"><span>或手动创建</span></div>
+              <div class="form-grid">
+                <label><span>技能名称</span><input id="memoryNameInput" value="IC Memo 框架" /></label>
+                <label><span>适用场景</span><input id="memorySceneInput" value="投委会前投资备忘录" /></label>
+              </div>
+              <textarea id="memoryContentInput">结论先行：一句话建议、投资亮点、核心风险、估值与条款、下一步尽调动作。</textarea>
+              <div class="agent-bar"><button class="primary-button" id="addMemoryBtn"><span class="button-icon" data-icon="plus"></span>保存技能</button></div>
+            </section>
+            <section class="panel"><div class="panel-header compact"><h2>技能库</h2><span class="status-pill">可复用</span></div><div id="memoryList" class="table-list"></div></section>
+          </div>
+        </section>
+
+        <section class="view" id="projectsView" data-title="投资项目">
+          <div class="projects-head"><h2>项目</h2><button class="primary-button" id="openProjectModalBtn"><span data-icon="plus"></span>新建项目</button></div>
+          <section class="empty-hero projects-empty" id="projectsEmpty"><span data-icon="folder"></span><h2>还没有项目</h2><p>BP 分析：上传一份 BP 快速评估 · 项目尽调：对项目做完整深入研究</p><div class="row-actions"><button class="secondary-button" id="openBpAnalysisBtn">+ BP 分析</button><button class="secondary-button" id="openDdProjectBtn">+ 项目尽调</button></div></section>
+          <div id="projectList" class="project-card-grid"></div>
+        </section>
+
+        <section class="view" id="bpAnalysisView" data-title="BP 分析">
+          <div class="subview-head"><button class="icon-button" data-view-jump="projects">‹</button><div><h2>BP 分析</h2><p>上传 BP 后选择分析角度，一键得到多维度评估。</p></div></div>
+          <div class="bp-layout"><section><h3>分析角度</h3><div class="dimension-grid" id="bpDimensionGrid">
+            <label><input type="checkbox" value="行业分析" checked /><strong>行业分析</strong><small>市场规模、增长趋势、竞争格局</small></label>
+            <label><input type="checkbox" value="政策环境" checked /><strong>政策环境</strong><small>产业政策、监管环境、合规性</small></label>
+            <label><input type="checkbox" value="竞争格局" checked /><strong>竞争格局</strong><small>主要竞争对手、差异化、市场份额</small></label>
+            <label><input type="checkbox" value="产品与技术" checked /><strong>产品与技术</strong><small>技术路线、成熟度、知识产权</small></label>
+            <label><input type="checkbox" value="团队评估" checked /><strong>团队评估</strong><small>创始团队背景、经验与互补性</small></label>
+            <label><input type="checkbox" value="财务分析" checked /><strong>财务分析</strong><small>收入模型、单位经济、融资需求</small></label>
+            <label><input type="checkbox" value="真实性核验" checked /><strong>真实性核验</strong><small>履历、融资、市场数据和竞品</small></label>
+          </div></section><aside><h3>BP 文件</h3><label class="bp-upload"><input id="bpFileInput" type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md" /><span data-icon="upload"></span><strong>点击或拖拽上传 BP</strong><small>支持 PDF / PPT / PPTX / DOC / DOCX</small></label><input id="bpProjectName" placeholder="项目名称（可选）" /></aside></div>
+          <div class="agent-bar bp-action"><span id="bpFileHint">请先上传 BP 文件</span><button class="primary-button" id="runBpAnalysisBtn">开始分析</button></div>
+          <section class="panel prose-output" id="bpAnalysisOutput" hidden></section>
+        </section>
+
+        <section class="view" id="projectDetailView" data-title="项目尽调">
+          <div class="project-detail-head"><button class="text-button" data-view-jump="projects">‹ 返回项目</button><div><strong id="detailProjectName">项目</strong><span class="status-pill" id="detailProjectStage">初筛</span></div><button class="secondary-button" data-view-jump="board">加入看板</button></div>
+          <div class="target-company-bar"><span>标的公司全称</span><input id="targetCompanyInput" placeholder="输入被调查方公司全称" /><button class="primary-button" id="saveTargetCompanyBtn">保存</button></div>
+          <div class="project-detail-layout"><main><div class="project-empty-state"><span data-icon="folder"></span><h2 id="detailWorkspaceTitle">项目知识库</h2><p>上传的文件和生成的 DD 产物会自动成为 Ask 奔奔的上下文。</p></div><div id="ddOutput" class="panel prose-output" hidden></div></main><aside class="dd-sidebar"><div class="report-top-tabs"><button class="report-top-tab active">DD 仪表盘</button><button class="report-top-tab">历史对话</button></div><h3>结构化 DD 产物</h3><select id="ddTypeSelect"><option>全部</option><option>风险</option><option>估值</option><option>关键指标</option><option>关键人物</option><option>竞品对标</option><option>融资历史</option><option>交易条款</option><option>待核实问题</option><option>尽调清单</option></select><textarea id="ddPromptInput" rows="6" placeholder="补充尽调要求，例如重点核验订单真实性和客户集中度"></textarea><button class="primary-button" id="generateDdBtn">生成 DD 产物</button></aside></div>
+        </section>
+
+        <section class="view" id="historyView" data-title="历史">
+          <div class="panel">
+            <div class="panel-header"><div><h2>操作历史</h2><p>记录生成报告、添加项目、运行任务、收藏等关键动作。</p></div><button class="secondary-button" id="clearHistoryBtn">清空历史</button></div>
+            <div id="historyList" class="table-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="settingsView" data-title="模型设置">
+          <div class="settings-layout">
+            <section class="panel">
+              <div class="panel-header"><div><h2>大模型配置</h2><p>默认使用火山方舟兼容接口。Key 仅保存在当前电脑的本地服务配置中。</p></div><span class="status-pill" id="settingsModelStatus">读取中</span></div>
+              <div class="model-profile-bar"><select id="settingsProfileSelect"></select><button class="secondary-button" id="newModelProfileBtn">新增模型</button><button class="secondary-button" id="deleteModelProfileBtn">删除当前</button></div>
+              <label><span>配置名称</span><input id="settingsProfileName" placeholder="例如：GLM-4.7 主模型" /></label>
+              <div class="form-grid">
+                <label><span>接口模式</span><select id="settingsMode"><option value="chat-completions">Chat Completions</option><option value="responses">Responses API</option></select></label>
+                <label><span>模型 / 推理接入点</span><input id="settingsModel" /></label>
+              </div>
+              <label><span>API 地址</span><input id="settingsApiUrl" /></label>
+              <label><span>API Key</span><input id="settingsApiKey" type="password" autocomplete="new-password" placeholder="已配置时留空即可；修改时输入新 Key" /></label>
+              <div class="agent-bar"><button class="primary-button" id="saveModelSettingsBtn"><span data-icon="save"></span>保存并应用</button><button class="secondary-button" id="testModelSettingsBtn"><span data-icon="play"></span>测试连接</button></div>
+            </section>
+            <aside class="panel settings-note"><h2>默认配置</h2><dl><dt>服务商</dt><dd>火山方舟</dd><dt>接口模式</dt><dd>OpenAI-compatible</dd><dt>保存位置</dt><dd>当前电脑本地配置</dd></dl><p>首次部署仍需配置一次有效 Key。之后启动会自动读取，不需要重复输入。</p></aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="taskModal" hidden>
+      <div class="template-modal compact-modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><h2 id="taskModalTitle">创建定时任务</h2><button class="icon-button" id="closeTaskModalBtn">×</button></div>
+        <div class="form-grid">
+          <label><span>任务名称</span><input id="taskNameInput" /></label>
+          <label><span>执行周期</span><select id="taskCadenceInput"><option value="daily">每天</option><option value="weekly">每周</option></select></label>
+          <label id="taskWeekdayField"><span>星期</span><select id="taskWeekdayInput"><option value="1">星期一</option><option value="2">星期二</option><option value="3">星期三</option><option value="4">星期四</option><option value="5">星期五</option><option value="6">星期六</option><option value="0">星期日</option></select></label>
+          <label><span>执行小时</span><select id="taskHourInput"></select></label>
+        </div>
+        <label class="prompt-field"><span>任务 Prompt</span><textarea id="taskPromptInput" rows="6"></textarea></label>
+        <div class="modal-actions"><button class="secondary-button" id="cancelTaskBtn">取消</button><button class="primary-button" id="addTaskBtn">保存任务</button></div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="screeningModal" hidden>
+      <div class="template-modal screening-modal" role="dialog" aria-modal="true"><div class="modal-head"><h2>新建筛选</h2><button class="icon-button" id="closeScreeningModalBtn">×</button></div><label class="prompt-field"><span>描述你在寻找什么样的公司</span><textarea id="nlSearchInput" rows="4" placeholder="例如：寻找近一年完成 A-B 轮融资、具备轨道交通产业协同价值的功率半导体公司"></textarea></label><div class="section-divider"><span>可选的结构化筛选条件</span></div><div class="form-grid"><label><span>行业赛道</span><select id="sectorFilter"><option value="">全部</option><option>人形机器人</option><option>固态电池</option><option>半导体设备</option><option>AI医疗</option><option>轨道交通</option></select></label><label><span>融资轮次</span><select id="roundFilter"><option value="">不限</option><option>天使轮</option><option>A轮</option><option>B轮</option><option>C轮</option></select></label><label><span>国家/地区</span><select id="regionFilter"><option value="">全部</option><option>华东</option><option>华南</option><option>华北</option><option>西南</option><option>海外</option></select></label><label><span>最近融资</span><select id="recencyFilter"><option>不限</option><option>近半年</option><option>近1年</option><option>近3年</option></select></label></div><div class="modal-actions"><button class="secondary-button" id="cancelScreeningBtn">取消</button><button class="primary-button" id="runSourcingBtn">执行筛选</button></div></div>
+    </div>
+
+    <div class="modal-backdrop" id="projectModal" hidden>
+      <div class="template-modal project-modal" role="dialog" aria-modal="true"><div class="modal-head"><h2 id="projectModalTitle">新建投资项目</h2><button class="icon-button" id="closeProjectModalBtn">×</button></div><div class="form-grid"><label><span>项目名称</span><input id="projectNameInput" /></label><label><span>行业赛道</span><input id="projectSectorInput" /></label><label><span>阶段</span><select id="projectStageInput"><option>初筛</option><option>立项</option><option>尽调</option><option>投后</option></select></label><label><span>负责人</span><input id="projectOwnerInput" /></label><label><span>融资阶段</span><select id="projectRoundInput"><option>种子轮</option><option>天使轮</option><option>Pre-A</option><option>A轮</option><option>B轮</option><option>C轮</option><option>Pre-IPO</option><option>已上市</option></select></label><label><span>拟投资金额</span><input id="projectAmountInput" /></label><label><span>拟持股比例</span><input id="projectEquityInput" /></label></div><label class="prompt-field"><span>项目简介</span><textarea id="projectNoteInput" rows="4"></textarea></label><div class="modal-actions"><button class="secondary-button" id="cancelProjectBtn">取消</button><button class="primary-button" id="addProjectBtn">创建项目</button></div></div>
+    </div>
+
+    <div class="modal-backdrop" id="templateModal" hidden>
+      <div class="template-modal" role="dialog" aria-modal="true" aria-labelledby="templateModalTitle">
+        <div class="modal-head">
+          <h2 id="templateModalTitle">选择模板</h2>
+          <button class="icon-button" id="closeTemplateModalBtn">×</button>
+        </div>
+        <div id="templateGrid" class="template-grid"></div>
+      </div>
+    </div>
+
+    <aside class="job-center" id="jobCenter" hidden>
+      <div class="job-center-head">
+        <div><strong>任务进度</strong><small id="jobCenterSummary">正在执行</small></div>
+        <div class="row-actions"><button class="icon-button" id="clearJobHistoryBtn" title="清空任务历史">×</button><button class="icon-button" id="minimizeJobCenterBtn" title="最小化">−</button></div>
+      </div>
+      <div class="job-center-list" id="jobCenterList"></div>
+    </aside>
+    <button class="job-center-launcher" id="jobCenterLauncher" hidden><span class="job-spinner"></span><b id="jobLauncherText">任务执行中</b></button>
+
+    <aside class="floating-eva" id="floatingEva" hidden>
+      <div class="floating-eva-head">
+        <div class="eva-identity"><span>TE</span><div><strong>奔奔</strong><small id="floatingModelStatus">自适应 AI 助手</small></div></div>
+        <div class="row-actions">
+          <button class="icon-button" id="floatingNewChatBtn" title="新对话">+</button>
+          <button class="icon-button" id="minimizeEvaBtn" title="最小化">−</button>
+        </div>
+      </div>
+      <div id="floatingChatMessages" class="chat-messages chat-messages-floating"></div>
+      <div class="floating-context" id="floatingContextLabel">正在查看：报告中心</div>
+      <div class="chat-composer floating-composer">
+        <textarea id="floatingChatInput" placeholder="问奔奔任何事..." rows="2"></textarea>
+        <button class="primary-button chat-send" id="floatingChatSendBtn">发送</button>
+      </div>
+    </aside>
+    <button class="eva-launcher" id="evaLauncher" hidden><span>TE</span><b>Ask 奔奔</b></button>
+
+    <script src="app.js"></script>
+    <script src="pwa.js"></script>
+  </body>
+</html>

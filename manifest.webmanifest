@@ -1,0 +1,15 @@
+{
+  "name": "时代电气智能投研助手",
+  "short_name": "投研助手",
+  "description": "云端智能投研工作台",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f7f5",
+  "theme_color": "#b91c1c",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
