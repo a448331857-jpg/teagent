@@ -1,5 +1,6 @@
 functions/**
 worker.js
+cloud-worker.js
 wrangler.jsonc
 README.md
 .dev.vars*
