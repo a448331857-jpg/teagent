@@ -23,18 +23,7 @@
    - `LLM_API_URL`：模型服务 API 地址
    - `LLM_MODEL`：模型名或推理接入点 ID
    - `LLM_API_KEY`：模型服务密钥（必须设为加密变量）
-   - `ADMIN_PASSWORD`：管理员登录密码（必须设为加密变量）
 5. 重新部署。访问 Cloudflare 分配的 HTTPS 域名即可使用。
-
-### 管理员云端配置
-
-1. 在 Cloudflare 创建一个 Workers KV Namespace，例如 `teagent-model-config`。
-2. 进入 Worker 的“设置 → Bindings”，添加 KV Namespace 绑定。
-3. Variable name 必须填写 `MODEL_CONFIG`，选择刚创建的 Namespace。
-4. 设置 `ADMIN_PASSWORD` Secret 并重新部署。
-5. 打开软件“模型设置”，使用管理员密码登录，即可查看完整 Key、修改配置并保存到 KV。
-
-管理员会话使用签名的 HttpOnly Cookie，有效期 8 小时。普通用户只能查看掩码状态和调用模型，不能读取完整密钥。
 
 程序已经内置 `chat-completions`、火山方舟接口地址和默认推理接入点 ID；生产部署最少只需配置加密变量 `LLM_API_KEY`。其他变量仍可用于覆盖内置默认值。
 

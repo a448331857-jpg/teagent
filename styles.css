@@ -1923,10 +1923,3 @@ textarea:focus {
   body { padding-bottom: env(safe-area-inset-bottom); }
   .pwa-install-button { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
-/* Administrator controls */
-.admin-login-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; margin-bottom: 14px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; }
-.admin-login-bar input { flex: 1 1 220px; min-width: 180px; }
-.admin-login-bar span { color: #6b7280; font-size: 13px; }
-.admin-login-bar span[data-state="error"] { color: #b91c1c; font-weight: 700; }
-.admin-login-bar span[data-state="success"] { color: #15803d; font-weight: 700; }
-.admin-login-bar span[data-state="loading"] { color: #a16207; }
