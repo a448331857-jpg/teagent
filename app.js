@@ -704,6 +704,9 @@ function switchView(view) {
 }
 
 function bindSettings() {
+  $("#adminLoginBtn").addEventListener("click", adminLogin);
+  $("#adminLogoutBtn").addEventListener("click", adminLogout);
+  $("#adminPasswordInput").addEventListener("keydown", (event) => { if (event.key === "Enter") adminLogin(); });
   $("#saveModelSettingsBtn").addEventListener("click", saveModelSettings);
   $("#testModelSettingsBtn").addEventListener("click", testModelSettings);
   $("#settingsProfileSelect").addEventListener("change", () => loadModelProfile($("#settingsProfileSelect").value));
@@ -725,6 +728,7 @@ function bindSettings() {
 }
 
 let availableModelProfiles = [];
+let adminAuthenticated = false;
 
 function loadModelProfile(profileId) {
   const profile = availableModelProfiles.find((item) => item.id === profileId);
@@ -733,7 +737,7 @@ function loadModelProfile(profileId) {
   $("#settingsMode").value = profile.mode;
   $("#settingsApiUrl").value = profile.apiUrl;
   $("#settingsModel").value = profile.model;
-  $("#settingsApiKey").value = "";
+  $("#settingsApiKey").value = adminAuthenticated ? profile.apiKey || "" : "";
   $("#settingsApiKey").placeholder = profile.keyConfigured ? `已配置 ${profile.maskedKey}，留空则不修改` : "输入 API Key";
   $("#settingsModelStatus").textContent = profile.keyConfigured ? `已连接 · ${profile.name || "未命名配置"}` : "待配置 Key";
 }
@@ -743,6 +747,7 @@ async function loadModelSettings() {
     const response = await fetch("/api/settings", { cache: "no-store" });
     const settings = await response.json();
     if (!response.ok) throw new Error(settings.error || "读取配置失败");
+    adminAuthenticated = Boolean(settings.adminAuthenticated);
     availableModelProfiles = settings.profiles || [settings];
     const options = availableModelProfiles.map((profile) => `<option value="${profile.id}">${escapeHtml(profile.name || "未命名配置")}</option>`).join("");
     $("#settingsProfileSelect").innerHTML = `<option value="">新增模型...</option>${options}`;
@@ -753,17 +758,38 @@ async function loadModelSettings() {
     $("#settingsProfileSelect").value = settings.activeProfileId || activeId;
     $("#askModelSelect").value = selectedModelProfileId;
     loadModelProfile($("#settingsProfileSelect").value);
-    if (settings.cloudManaged) {
-      ["#settingsProfileSelect", "#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"].forEach((selector) => {
-        const element = $(selector);
-        if (element) element.disabled = true;
-      });
-      $("#settingsApiKey").placeholder = settings.keyConfigured ? "密钥由云端安全托管" : "请由管理员在云平台配置密钥";
-      $("#saveModelSettingsBtn").textContent = "云端统一管理";
-    }
+    setSettingsAdminState(settings);
   } catch (error) {
     $("#settingsModelStatus").textContent = "读取失败";
   }
+}
+
+function setSettingsAdminState(settings) {
+  const selectors = ["#settingsProfileSelect", "#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"];
+  selectors.forEach((selector) => { const element = $(selector); if (element) element.disabled = !adminAuthenticated; });
+  $("#adminPasswordInput").hidden = adminAuthenticated;
+  $("#adminLoginBtn").hidden = adminAuthenticated;
+  $("#adminLogoutBtn").hidden = !adminAuthenticated;
+  $("#adminLoginStatus").textContent = adminAuthenticated ? (settings.storageReady ? "管理员已登录 · KV 存储已连接" : "管理员已登录 · 尚未绑定 MODEL_CONFIG KV") : "登录后可查看和修改完整云端配置";
+  $("#saveModelSettingsBtn").textContent = adminAuthenticated ? "保存并应用" : "请先登录管理员";
+}
+
+async function adminLogin() {
+  const password = $("#adminPasswordInput").value;
+  if (!password) return toast("请输入管理员密码。");
+  const response = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) return toast(data.error || "管理员登录失败");
+  $("#adminPasswordInput").value = "";
+  toast("管理员登录成功。");
+  await loadModelSettings();
+}
+
+async function adminLogout() {
+  await fetch("/api/admin/logout", { method: "POST" });
+  adminAuthenticated = false;
+  toast("已退出管理员登录。");
+  await loadModelSettings();
 }
 
 async function saveModelSettings() {
@@ -813,7 +839,7 @@ async function testModelSettings() {
   button.disabled = true;
   button.textContent = "测试中...";
   try {
-    const cloudManaged = $("#saveModelSettingsBtn").disabled;
+    const cloudManaged = !adminAuthenticated;
     if (!cloudManaged) {
       const saved = await saveModelSettings();
       if (!saved) throw new Error("配置未保存");
