@@ -776,13 +776,34 @@ function setSettingsAdminState(settings) {
 
 async function adminLogin() {
   const password = $("#adminPasswordInput").value;
-  if (!password) return toast("请输入管理员密码。");
-  const response = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) return toast(data.error || "管理员登录失败");
-  $("#adminPasswordInput").value = "";
-  toast("管理员登录成功。");
-  await loadModelSettings();
+  const button = $("#adminLoginBtn");
+  const status = $("#adminLoginStatus");
+  if (!password) {
+    status.textContent = "请输入管理员密码";
+    status.dataset.state = "error";
+    return toast("请输入管理员密码。");
+  }
+  button.disabled = true;
+  button.textContent = "登录中...";
+  status.textContent = "正在验证管理员身份...";
+  status.dataset.state = "loading";
+  try {
+    const response = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `登录接口返回 ${response.status}`);
+    $("#adminPasswordInput").value = "";
+    status.textContent = "管理员登录成功";
+    status.dataset.state = "success";
+    toast("管理员登录成功。");
+    await loadModelSettings();
+  } catch (error) {
+    status.textContent = error.message || "管理员登录失败";
+    status.dataset.state = "error";
+    toast(`登录失败：${error.message || "未知错误"}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "管理员登录";
+  }
 }
 
 async function adminLogout() {

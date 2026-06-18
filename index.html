@@ -386,7 +386,7 @@
           <div class="settings-layout">
             <section class="panel">
               <div class="panel-header"><div><h2>大模型配置</h2><p>默认使用火山方舟兼容接口。Key 仅保存在当前电脑的本地服务配置中。</p></div><span class="status-pill" id="settingsModelStatus">读取中</span></div>
-              <div class="admin-login-bar" id="adminLoginBar"><input id="adminPasswordInput" type="password" autocomplete="current-password" placeholder="管理员密码" /><button class="secondary-button" id="adminLoginBtn">管理员登录</button><button class="secondary-button" id="adminLogoutBtn" hidden>退出登录</button><span id="adminLoginStatus">登录后可查看和修改完整云端配置</span></div>
+              <div class="admin-login-bar" id="adminLoginBar"><input id="adminPasswordInput" type="password" autocomplete="current-password" placeholder="管理员密码" /><button type="button" class="secondary-button" id="adminLoginBtn">管理员登录</button><button type="button" class="secondary-button" id="adminLogoutBtn" hidden>退出登录</button><span id="adminLoginStatus" role="status" aria-live="polite">登录后可查看和修改完整云端配置</span></div>
               <div class="model-profile-bar"><select id="settingsProfileSelect"></select><button class="secondary-button" id="newModelProfileBtn">新增模型</button><button class="secondary-button" id="deleteModelProfileBtn">删除当前</button></div>
               <label><span>配置名称</span><input id="settingsProfileName" placeholder="例如：GLM-4.7 主模型" /></label>
               <div class="form-grid">
