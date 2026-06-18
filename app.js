@@ -790,7 +790,10 @@ async function adminLogin() {
   try {
     const response = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `登录接口返回 ${response.status}`);
+    if (!response.ok) {
+      const bindings = Array.isArray(data.availableBindings) ? `；当前绑定：${data.availableBindings.join(", ") || "无"}` : "";
+      throw new Error(`${data.error || `登录接口返回 ${response.status}`}${bindings}`);
+    }
     $("#adminPasswordInput").value = "";
     status.textContent = "管理员登录成功";
     status.dataset.state = "success";

@@ -64,14 +64,14 @@ async function isAdmin(request, env) {
 
 async function handleAdmin(request, env, pathname) {
   if (pathname === "/api/admin/login" && request.method === "POST") {
-    if (!env.ADMIN_PASSWORD) return json({ error: "尚未配置 ADMIN_PASSWORD" }, 503);
+    if (!env.ADMIN_PASSWORD) return json({ error: "尚未配置 ADMIN_PASSWORD", availableBindings: Object.keys(env).sort(), deployment: "admin-kv-v2" }, 503);
     const body = await request.json().catch(() => ({}));
     if (String(body.password || "") !== String(env.ADMIN_PASSWORD)) return json({ error: "管理员密码错误" }, 401);
     const token = await createSession(env.ADMIN_PASSWORD);
     return json({ ok: true }, 200, { "Set-Cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800` });
   }
   if (pathname === "/api/admin/logout" && request.method === "POST") return json({ ok: true }, 200, { "Set-Cookie": `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0` });
-  return json({ authenticated: await isAdmin(request, env), storageReady: Boolean(env.MODEL_CONFIG) });
+  return json({ authenticated: await isAdmin(request, env), passwordConfigured: Boolean(env.ADMIN_PASSWORD), storageReady: Boolean(env.MODEL_CONFIG), availableBindings: Object.keys(env).sort(), deployment: "admin-kv-v2" });
 }
 
 async function handleSettings(request, env) {
