@@ -6,14 +6,20 @@ function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
+function envValue(env, ...names) {
+  const wanted = names.map((name) => name.toUpperCase());
+  const actual = Object.keys(env).find((key) => wanted.includes(key.replace(/^\uFEFF/, "").trim().toUpperCase()));
+  return actual ? env[actual] : "";
+}
+
 function profileFromEnv(env) {
   return {
     id: "default",
-    name: env.LLM_MODEL_NAME || env.LLM_MODEL || "默认模型",
-    mode: env.LLM_API_MODE === "responses" ? "responses" : "chat-completions",
-    apiUrl: env.LLM_API_URL || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
-    model: env.LLM_MODEL || "ep-20260617144511-8tl99",
-    apiKey: env.LLM_API_KEY || "",
+    name: envValue(env, "LLM_MODEL_NAME") || envValue(env, "LLM_MODEL") || "默认模型",
+    mode: envValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
+    apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
+    model: envValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
+    apiKey: envValue(env, "LLM_API_KEY", "ARK_API_KEY"),
   };
 }
 
@@ -53,7 +59,7 @@ export default {
     const url = new URL(request.url);
     const profile = profileFromEnv(env);
     if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ ok: true, configured: Boolean(profile.apiKey && profile.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: [visibleProfile(profile)], runtime: "env-v1" });
+      return json({ ok: true, configured: Boolean(profile.apiKey && profile.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: [visibleProfile(profile)], runtime: "env-v2", availableBindings: Object.keys(env).sort(), apiKeyBindingDetected: Object.keys(env).some((key) => ["LLM_API_KEY", "ARK_API_KEY"].includes(key.replace(/^\uFEFF/, "").trim().toUpperCase())) });
     }
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);
