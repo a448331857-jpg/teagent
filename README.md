@@ -13,12 +13,12 @@
 - 云端模型代理，API Key 不下发到浏览器
 - 多模型列表、模型切换与按模型执行对话
 
-## 部署到 Cloudflare Pages
+## 部署到 Cloudflare Workers
 
 1. 将本目录提交到 GitHub 或 GitLab 仓库。
-2. 在 Cloudflare 控制台创建 Pages 项目并连接该仓库。
-3. 构建命令留空；构建输出目录填写 `/`。
-4. 在项目的“设置 → 环境变量和密钥”中添加：
+2. 在 Cloudflare 控制台创建 Workers Builds 项目并连接该仓库。
+3. 部署命令使用 `npx wrangler deploy`，无需构建命令。
+4. 在 Worker 的“设置 → 变量和机密”中添加：
    - `LLM_API_MODE`：`chat-completions` 或 `responses`
    - `LLM_API_URL`：模型服务 API 地址
    - `LLM_MODEL`：模型名或推理接入点 ID
@@ -29,7 +29,7 @@
 
 配置多模型时，可以增加加密变量 `LLM_PROFILES`，值为 JSON 数组；其字段为 `id`、`name`、`mode`、`apiUrl`、`model` 和 `apiKey`。设置后会优先使用多模型配置。
 
-`functions/api` 会由 Cloudflare Pages 自动识别，不需要运行 Node 服务器，也没有 npm 构建步骤。
+`worker.js` 是唯一 Worker 入口，`app.js` 等文件只作为浏览器静态资源发布。本机不需要运行 Node 服务器。
 
 ## 安装到设备
 

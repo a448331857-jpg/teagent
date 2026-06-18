@@ -1,0 +1,7 @@
+functions/**
+worker.js
+wrangler.jsonc
+README.md
+.dev.vars*
+.gitignore
+.assetsignore
