@@ -1,0 +1,11 @@
+{
+  "name": "teagent",
+  "main": "app.js",
+  "compatibility_date": "2026-06-01",
+  "vars": {
+    "LLM_API_MODE": "",
+    "LLM_API_URL": "",
+    "LLM_MODEL": "",
+    "LLM_API_KEY": ""
+  }
+}
