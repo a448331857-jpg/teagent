@@ -753,8 +753,9 @@ function loadModelProfile(profileId) {
   $("#settingsApiUrl").value = profile.apiUrl;
   $("#settingsModel").value = profile.model;
   $("#settingsApiKey").value = "";
-  $("#settingsApiKey").placeholder = profile.keyConfigured ? `已配置 ${profile.maskedKey}，留空则不修改` : "输入 API Key";
-  $("#settingsModelStatus").textContent = profile.keyConfigured ? `已连接 · ${profile.name || "未命名配置"}` : "待配置 Key";
+  const ready = Boolean(profile.keyConfigured && profile.model);
+  $("#settingsApiKey").placeholder = profile.keyConfigured ? `已配置 ${profile.maskedKey}` : "未配置 API Key";
+  $("#settingsModelStatus").textContent = ready ? `已连接 · ${profile.name || "未命名配置"}` : profile.keyConfigured ? "待配置模型 ID" : "待配置 Key";
 }
 
 async function loadModelSettings() {
