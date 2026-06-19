@@ -21,14 +21,22 @@ function cleanApiKey(value) {
     .trim();
 }
 
-function profileFromEnv(env) {
+async function resolveApiKey(env) {
+  const binding = envValue(env, "LLM_API_KEY", "ARK_API_KEY");
+  if (binding && typeof binding === "object" && typeof binding.get === "function") {
+    try { return cleanApiKey(await binding.get()); } catch { return ""; }
+  }
+  return cleanApiKey(binding);
+}
+
+async function profileFromEnv(env) {
   return {
     id: "default",
     name: envValue(env, "LLM_MODEL_NAME") || envValue(env, "LLM_MODEL") || "默认模型",
     mode: envValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
     apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
     model: envValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
-    apiKey: cleanApiKey(envValue(env, "LLM_API_KEY", "ARK_API_KEY")),
+    apiKey: await resolveApiKey(env),
   };
 }
 
@@ -37,7 +45,7 @@ function visibleProfile(profile) {
 }
 
 async function handleChat(request, env) {
-  const profile = profileFromEnv(env);
+  const profile = await profileFromEnv(env);
   if (!profile.apiKey) return json({ error: "当前 Worker 未读取到 LLM_API_KEY" }, 503);
   let body;
   try { body = await request.json(); } catch { return json({ error: "请求格式无效" }, 400); }
@@ -66,10 +74,10 @@ async function handleChat(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const profile = profileFromEnv(env);
+    const profile = await profileFromEnv(env);
     if (url.pathname === "/api/health" && request.method === "GET") {
       const rawKey = envValue(env, "LLM_API_KEY", "ARK_API_KEY");
-      return json({ ok: true, configured: Boolean(profile.apiKey && profile.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: [visibleProfile(profile)], runtime: "env-v3", availableBindings: Object.keys(env).sort(), apiKeyBindingDetected: Object.keys(env).some((key) => ["LLM_API_KEY", "ARK_API_KEY"].includes(key.replace(/^\uFEFF/, "").trim().toUpperCase())), apiKeyDiagnostics: { rawLength: String(rawKey || "").length, cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
+      return json({ ok: true, configured: Boolean(profile.apiKey && profile.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: [visibleProfile(profile)], runtime: "env-v4", availableBindings: Object.keys(env).sort(), apiKeyBindingDetected: Object.keys(env).some((key) => ["LLM_API_KEY", "ARK_API_KEY"].includes(key.replace(/^\uFEFF/, "").trim().toUpperCase())), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
     }
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);
