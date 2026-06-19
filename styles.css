@@ -1902,24 +1902,7 @@ textarea:focus {
   .target-company-bar { grid-template-columns: 1fr; margin: 0 -18px 18px; padding: 12px 18px; }
   .project-detail-layout { margin: 0 -18px -18px; }
 }
-/* PWA install action and phone safe areas */
-.pwa-install-button {
-  position: fixed;
-  right: max(18px, env(safe-area-inset-right));
-  bottom: max(18px, env(safe-area-inset-bottom));
-  z-index: 10000;
-  border: 0;
-  border-radius: 999px;
-  padding: 12px 18px;
-  color: #fff;
-  background: #b91c1c;
-  box-shadow: 0 8px 28px rgba(127, 29, 29, .28);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 @media (max-width: 760px) {
   body { padding-bottom: env(safe-area-inset-bottom); }
-  .pwa-install-button { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
+.job-progress-item .job-error-detail { display: block; margin-top: 6px; color: #b91c1c; white-space: normal; line-height: 1.4; word-break: break-word; }

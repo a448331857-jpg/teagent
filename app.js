@@ -2,7 +2,7 @@ const STORAGE_KEY = "investment-agent-mvp-state-v2";
 const JOB_HISTORY_KEY = "times-electric-agent-job-history-v1";
 const AI_CONFIG = {
   endpoint: "/api/chat",
-  timeoutMs: 180000,
+  timeoutMs: 600000,
 };
 
 const sampleCompanies = [
@@ -596,7 +596,8 @@ function renderJobCenter() {
     const progress = job.status === "running" ? Math.min(90, 10 + Math.floor(elapsed / 1800)) : 100;
     const statusText = job.status === "running" ? `处理中 · ${Math.floor(elapsed / 1000)} 秒` : job.status === "success" ? "已完成" : "执行失败";
     const time = job.finishedAt || job.startedAt;
-    return `<article class="job-progress-item ${job.status}" data-job-id="${job.id}" title="打开对应任务"><div><strong>${escapeHtml(job.label)}</strong><span>${statusText}</span></div><div class="job-progress-track"><i style="width:${progress}%"></i></div><small>${formatDate(new Date(time).toISOString())}</small></article>`;
+    const detail = job.status === "error" && job.detail ? `<small class="job-error-detail">${escapeHtml(job.detail)}</small>` : "";
+    return `<article class="job-progress-item ${job.status}" data-job-id="${job.id}" title="${escapeHtml(job.detail || "打开对应任务")}"><div><strong>${escapeHtml(job.label)}</strong><span>${statusText}</span></div><div class="job-progress-track"><i style="width:${progress}%"></i></div><small>${formatDate(new Date(time).toISOString())}</small>${detail}</article>`;
   }).join("") || '<p class="sidebar-empty-light">暂无任务记录</p>';
 }
 
@@ -1125,7 +1126,7 @@ function isTaskDue(task, now = new Date()) {
 function friendlyRequestError(error) {
   const message = String(error?.message || error || "未知错误");
   if (/failed to fetch|networkerror|load failed|signal is aborted/i.test(message)) {
-    return "无法连接本地大模型服务，请确认 server.mjs 正在运行且 8787 端口可访问";
+    return "无法连接云端模型接口，请检查 Worker 部署、网络和火山方舟服务状态";
   }
   if (/api key|401|unauthorized/i.test(message)) return "大模型 API Key 无效或已过期，请在模型设置中更新";
   if (/timeout|timed out/i.test(message)) return "大模型响应超时，请稍后重试";
@@ -1644,7 +1645,7 @@ async function requestScreeningCandidates(query, filters) {
 筛选要求：${query}
 行业：${filters.sector || "不限"}；轮次：${filters.round || "不限"}；地区：${filters.region || "不限"}；最近融资：${filters.recency}
 请兼顾产业链核心、技术创新、成长性和产业协同，使用紧凑 JSON。严格输出 JSON 数组，不要输出解释。每项字段：name（公司公开全称）、sector、round、region、revenue、intro、financing、tags（数组）、reason、score（0-100）、sourceName（可核验的公开来源名称）、sourceUrl（确知时填写，否则空字符串）。无法确认的融资、营收和轮次必须填写“待核验”，禁止猜测精确数字。`;
-  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 300000 });
+  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000 });
   const parsed = parseJsonPayload(answer);
   if (Array.isArray(parsed)) return parsed;
   if (Array.isArray(parsed?.companies)) return parsed.companies;
@@ -1949,7 +1950,7 @@ async function callChatApi() {
     if (!data.message) throw new Error("模型接口没有返回 message");
     return data.message;
   } catch (error) {
-    if (timedOut) throw new Error("模型响应超过 3 分钟，请重试");
+    if (timedOut) throw new Error("模型响应超过 10 分钟，请重试");
     throw error;
   } finally {
     window.clearTimeout(timer);
