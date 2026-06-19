@@ -1,8 +1,9 @@
 const STORAGE_KEY = "investment-agent-mvp-state-v2";
 const JOB_HISTORY_KEY = "times-electric-agent-job-history-v1";
-const TOKEN_USAGE_KEY = "times-electric-token-usage-v1";
+const WORKER_ORIGIN = "https://teagent.tankoagent.workers.dev";
+const apiUrl = (path) => `${WORKER_ORIGIN}${path}`;
 const AI_CONFIG = {
-  endpoint: "/api/chat",
+  endpoint: apiUrl("/api/chat"),
   timeoutMs: 600000,
 };
 
@@ -123,9 +124,12 @@ let reportMode = "mine";
 let activeTemplateFormat = "DOCX";
 let editingReportId = null;
 let currentView = "ask";
-let evaMinimized = false;
+let preserveSourcingResultOnce = false;
+let evaMinimized = true;
 let pendingChatFiles = [];
 let chatRequestInFlight = false;
+let activeChatController = null;
+let chatStoppedByUser = false;
 let boardMode = "kanban";
 let bpDocument = null;
 let activeProjectId = null;
@@ -137,6 +141,10 @@ let jobCenterMinimized = true;
 let jobLauncherWasDragged = false;
 let editingProjectId = null;
 let selectedModelProfileId = localStorage.getItem("times-electric-selected-model") || "";
+let peopleMode = "direction";
+let favoriteFilter = "全部";
+let favoriteSort = "time";
+let researchMode = "professional";
 
 const reportTemplates = {
   DOCX: [
@@ -389,6 +397,7 @@ function boot() {
   bindTasks();
   bindMemory();
   bindBoard();
+  bindFavorites();
   bindSettings();
   bindProjects();
   bindHistory();
@@ -487,26 +496,12 @@ function saveJobHistory() {
   localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(completedAgentJobs.slice(0, 30)));
 }
 
-function recordTokenUsage(usage) {
-  if (!usage) return "";
-  const input = Number(usage.inputTokens || 0);
-  const output = Number(usage.outputTokens || 0);
-  const total = Number(usage.totalTokens || input + output);
-  const saved = JSON.parse(localStorage.getItem(TOKEN_USAGE_KEY) || '{"input":0,"output":0,"total":0,"requests":0}');
-  saved.input += input; saved.output += output; saved.total += total; saved.requests += 1;
-  localStorage.setItem(TOKEN_USAGE_KEY, JSON.stringify(saved));
-  return `Token：输入 ${input.toLocaleString()} · 输出 ${output.toLocaleString()} · 合计 ${total.toLocaleString()}`;
-}
-
-function totalTokenUsage() {
-  try { return JSON.parse(localStorage.getItem(TOKEN_USAGE_KEY) || "{}").total || 0; } catch { return 0; }
-}
-
 function getJobLabel(context = {}) {
   const labels = {
     "research-report": "生成投研报告",
-    "target-screening": "标的搜集 · 20条",
+    "target-screening": "标的搜集 · 最多100条",
     "skill-generation": "生成智能体 Skill",
+    "people-research": "联网人物调查",
     "scheduled-research": context.taskName ? `执行：${context.taskName}` : "执行定时任务",
     "bp-analysis": context.projectName ? `分析 BP：${context.projectName}` : "分析 BP",
     "due-diligence": context.project ? `生成尽调：${context.project}` : "生成尽调产物",
@@ -520,6 +515,7 @@ function getJobTarget(context = {}) {
     "research-report": "research",
     "target-screening": "sourcing",
     "skill-generation": "memory",
+    "people-research": "people",
     "scheduled-research": "tasks",
     "bp-analysis": "bpAnalysis",
     "due-diligence": "projectDetail",
@@ -604,8 +600,7 @@ function renderJobCenter() {
   const running = activeJobs.filter((job) => job.status === "running");
   $("#jobCenter").hidden = jobCenterMinimized;
   $("#jobCenterLauncher").hidden = !jobCenterMinimized || jobs.length === 0;
-  const tokenTotal = totalTokenUsage();
-  $("#jobCenterSummary").textContent = running.length ? `${running.length} 个任务正在执行` : `任务已完成 · 累计 ${Number(tokenTotal).toLocaleString()} Token`;
+  $("#jobCenterSummary").textContent = running.length ? `${running.length} 个任务正在执行` : "任务已完成";
   $("#jobLauncherText").textContent = running.length ? `${running.length} 个任务执行中` : `任务记录 ${completedAgentJobs.length}`;
   $(".job-spinner").hidden = running.length === 0;
   $("#jobCenterList").innerHTML = jobs.map((job) => {
@@ -613,8 +608,7 @@ function renderJobCenter() {
     const progress = job.status === "running" ? Math.min(90, 10 + Math.floor(elapsed / 1800)) : 100;
     const statusText = job.status === "running" ? `处理中 · ${Math.floor(elapsed / 1000)} 秒` : job.status === "success" ? "已完成" : "执行失败";
     const time = job.finishedAt || job.startedAt;
-    const detail = job.detail ? `<small class="${job.status === "error" ? "job-error-detail" : "job-token-detail"}">${escapeHtml(job.detail)}</small>` : "";
-    return `<article class="job-progress-item ${job.status}" data-job-id="${job.id}" title="${escapeHtml(job.detail || "打开对应任务")}"><div><strong>${escapeHtml(job.label)}</strong><span>${statusText}</span></div><div class="job-progress-track"><i style="width:${progress}%"></i></div><small>${formatDate(new Date(time).toISOString())}</small>${detail}</article>`;
+    return `<article class="job-progress-item ${job.status}" data-job-id="${job.id}" title="打开对应任务"><div><strong>${escapeHtml(job.label)}</strong><span>${statusText}</span></div><div class="job-progress-track"><i style="width:${progress}%"></i></div>${job.detail ? `<p>${escapeHtml(job.detail)}</p>` : ""}<small>${formatDate(new Date(time).toISOString())}</small></article>`;
   }).join("") || '<p class="sidebar-empty-light">暂无任务记录</p>';
 }
 
@@ -630,7 +624,7 @@ async function checkModelHealth() {
 }
 
 async function getModelHealth() {
-  const response = await fetch("/api/health", { cache: "no-store" });
+  const response = await fetch(apiUrl("/api/health"), { cache: "no-store" });
   if (!response.ok) return null;
   return response.json();
 }
@@ -709,6 +703,12 @@ function bindLayoutControls() {
 }
 
 function switchView(view) {
+  if (view === "history") view = "favorites";
+  if (view === "sourcing" && currentView !== "sourcing" && !preserveSourcingResultOnce) {
+    state.currentScreeningResults = [];
+    renderCompanies();
+  }
+  preserveSourcingResultOnce = false;
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((panel) => panel.classList.remove("active"));
   const activeView = $(`#${view}View`);
@@ -754,13 +754,13 @@ function loadModelProfile(profileId) {
   $("#settingsModel").value = profile.model;
   $("#settingsApiKey").value = "";
   const ready = Boolean(profile.keyConfigured && profile.model);
-  $("#settingsApiKey").placeholder = profile.keyConfigured ? `已配置 ${profile.maskedKey}` : "未配置 API Key";
+  $("#settingsApiKey").placeholder = profile.keyConfigured ? `云端已配置 ${profile.maskedKey}` : "未配置 API Key";
   $("#settingsModelStatus").textContent = ready ? `已连接 · ${profile.name || "未命名配置"}` : profile.keyConfigured ? "待配置模型 ID" : "待配置 Key";
 }
 
 async function loadModelSettings() {
   try {
-    const response = await fetch("/api/settings", { cache: "no-store" });
+    const response = await fetch(apiUrl("/api/settings"), { cache: "no-store" });
     const settings = await response.json();
     if (!response.ok) throw new Error(settings.error || "读取配置失败");
     cloudManagedSettings = Boolean(settings.cloudManaged);
@@ -775,11 +775,7 @@ async function loadModelSettings() {
     $("#askModelSelect").value = selectedModelProfileId;
     loadModelProfile($("#settingsProfileSelect").value);
     if (cloudManagedSettings) {
-      ["#settingsProfileSelect", "#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"].forEach((selector) => {
-        const element = $(selector);
-        if (element) element.disabled = true;
-      });
-      $("#settingsApiKey").placeholder = settings.keyConfigured ? `云端已配置 ${settings.maskedKey}` : "Cloudflare 尚未读取到 LLM_API_KEY";
+      ["#settingsProfileSelect", "#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"].forEach((selector) => { const element = $(selector); if (element) element.disabled = true; });
       $("#saveModelSettingsBtn").textContent = "云端统一管理";
     }
   } catch (error) {
@@ -791,7 +787,7 @@ async function saveModelSettings() {
   const button = $("#saveModelSettingsBtn");
   button.disabled = true;
   try {
-    const response = await fetch("/api/settings", {
+    const response = await fetch(apiUrl("/api/settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -820,7 +816,7 @@ async function saveModelSettings() {
 async function deleteCurrentModelProfile() {
   const profileId = $("#settingsProfileSelect").value;
   if (!profileId || !window.confirm("确定删除当前模型配置吗？")) return;
-  const response = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", profileId }) });
+  const response = await fetch(apiUrl("/api/settings"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", profileId }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) return toast(data.error || "删除失败");
   selectedModelProfileId = data.activeProfileId || "";
@@ -834,8 +830,7 @@ async function testModelSettings() {
   button.disabled = true;
   button.textContent = "测试中...";
   try {
-    const cloudManaged = cloudManagedSettings;
-    if (!cloudManaged) {
+    if (!cloudManagedSettings) {
       const saved = await saveModelSettings();
       if (!saved) throw new Error("配置未保存");
     }
@@ -863,8 +858,8 @@ function bindAsk() {
       sendChatMessage(button.dataset.ask);
     });
   });
-  $("#askChatSendBtn").addEventListener("click", () => sendChatFromInput("#askChatInput"));
-  $("#floatingChatSendBtn").addEventListener("click", () => sendChatFromInput("#floatingChatInput"));
+  $("#askChatSendBtn").addEventListener("click", () => chatRequestInFlight ? stopChatGeneration() : sendChatFromInput("#askChatInput"));
+  $("#floatingChatSendBtn").addEventListener("click", () => chatRequestInFlight ? stopChatGeneration() : sendChatFromInput("#floatingChatInput"));
   $("#askChatInput").addEventListener("keydown", handleChatEnter);
   $("#floatingChatInput").addEventListener("keydown", handleChatEnter);
   $("#newChatBtn").addEventListener("click", startNewChat);
@@ -893,6 +888,11 @@ function bindAsk() {
 }
 
 function bindResearch() {
+  $$('[data-research-mode]').forEach((button) => button.addEventListener("click", () => {
+    researchMode = button.dataset.researchMode;
+    $$('[data-research-mode]').forEach((item) => item.classList.toggle("active", item === button));
+    $("#depthInput").value = researchMode === "deep" ? "深度尽调前置" : "标准研究";
+  }));
   $("#researchRecordSearch").addEventListener("input", renderResearchRecords);
   $("#researchRecordList").addEventListener("click", (event) => {
     const deleteButton = event.target.closest("[data-delete-research]");
@@ -950,7 +950,7 @@ function bindResearch() {
       toast(`生成失败：${error.message}`);
     } finally {
       button.disabled = false;
-      button.innerHTML = '<span class="button-icon" data-icon="play"></span>生成完整报告';
+      button.innerHTML = '<span class="button-icon" data-icon="play"></span>开始研究';
       renderIcons();
     }
   });
@@ -985,6 +985,7 @@ function bindResearch() {
 }
 
 function bindPeople() {
+  $$('[data-people-mode]').forEach((button) => button.addEventListener("click", () => setPeopleMode(button.dataset.peopleMode)));
   $("#peopleRecordSearch").addEventListener("input", renderPeopleRecords);
   $("#peopleRecordList").addEventListener("click", (event) => {
     const deleteButton = event.target.closest("[data-delete-person-record]");
@@ -1001,6 +1002,8 @@ function bindPeople() {
     if (!button) return;
     const record = state.peopleRecords.find((item) => item.id === button.dataset.personRecordId);
     if (!record) return;
+    setPeopleMode(record.mode || "person");
+    $("#personDirectionInput").value = record.direction || "";
     $("#personNameInput").value = record.name || "";
     $("#personCompanyInput").value = record.company || "";
     $("#personRoleInput").value = record.role || "";
@@ -1010,15 +1013,76 @@ function bindPeople() {
     $("#peopleOutput").innerHTML = currentPeopleReport?.html || "";
     toast("已打开人物调查记录。");
   });
-  $("#runPeopleBtn").addEventListener("click", () => {
-    currentPeopleReport = buildPeopleReport();
-    $("#peopleOutput").innerHTML = currentPeopleReport.html;
+  $("#runPeopleBtn").addEventListener("click", async () => {
+    const button = $("#runPeopleBtn");
+    const direction = $("#personDirectionInput").value.trim();
+    const name = $("#personNameInput").value.trim();
+    const company = $("#personCompanyInput").value.trim();
+    const role = peopleMode === "person" ? $("#personRoleInput").value.trim() : "";
+    const focus = peopleMode === "person" ? $("#personFocusInput").value.trim() : "";
+    if (peopleMode === "direction" && !direction) return toast("请描述要寻找的人才方向。");
+    if (peopleMode === "person" && !name) return toast("请输入要调查的人物姓名。");
+    button.disabled = true;
+    button.textContent = peopleMode === "direction" ? "联网找人中..." : "联网调查中...";
+    try {
+      const query = peopleMode === "direction" ? direction : `${name} ${company} ${role}`;
+      const personAliases = peopleMode === "person" ? getPersonAliases(name) : [];
+      const looksLikeName = peopleMode === "direction" && /^[\u4e00-\u9fa5]{2,4}$/.test(direction);
+      const plannedQueries = looksLikeName ? await planPersonQueries(direction) : [];
+      const queries = looksLikeName
+        ? [`"${direction}" site:edu.cn`, `"${direction}" site:gov.cn`, `"${direction}" site:org.cn`, `"${direction}" 董事长 创始人`, `"${direction}" 教授 博士 研究员`, ...plannedQueries].slice(0, 10)
+        : peopleMode === "direction"
+          ? [`"${direction}" 创始人 CEO 融资 -招聘`, `"${direction}" 教授 专家 课题组 论文 -招聘`, `"${direction}" 投资人 演讲 峰会 -招聘`, `"${direction}" 专利 技术负责人`, `"${direction}" site:edu.cn OR site:gov.cn`, `"${direction}" 行业协会 专家委员会`]
+        : [`${name} ${company} 人物 履历 任职`, `${name} ${company} 创始人 CEO 新闻`, `${name} ${company} 访谈 演讲`, `${name} ${company} 工商 股东`, `${name} 论文 专利 学位`, `${name} ${company} 诉讼 处罚 风险`, ...personAliases.flatMap((alias) => [`${alias} ${company} biography`, `${alias} ${company} profile`])];
+      const requiredPersonName = peopleMode === "person" ? name : looksLikeName ? direction : "";
+      const sources = await searchPeopleSources(queries, requiredPersonName, peopleMode === "person", personAliases);
+      const sourceText = sources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n");
+      const prompt = peopleMode === "direction"
+        ? `你是一级市场投资机构的首席人才研究分析师。${looksLikeName ? `“${direction}”看起来是姓名：先完成同名人物消歧，严禁把不同人的经历、机构和成果合并。` : `围绕“${direction}”建立可用于投资发现的人物图谱。`}
+自动执行以下深度调查要求：
+1. 先解释领域结构，并按“学术权威/核心技术领军者/产业创业者与高管/投资人与产业组织者”等合理子方向分组。
+2. 每位候选必须给出当前机构与角色、可核验核心成果、产业影响或投资价值；优先列出有论文、专利、产品、创业、融资或产业落地证据的人。
+3. 尽量提供 12-20 位高相关候选；来源不足时宁缺毋滥，不能用常识补写。
+4. 同名人物按机构分别成行；不确定身份标记“待核验”，不得将推断写成事实。
+5. 结尾总结关键人才集群、值得持续跟踪的人物及调查盲区。
+只能使用下方联网来源。严格返回 JSON：{"title":"标题","summary":"领域结构与检索结论","groups":[{"title":"分组名称","description":"该组在产业或学术体系中的作用","people":[{"name":"姓名","institution":"国家/机构","role":"当前角色","contribution":"核心成果、产业贡献与匹配理由","sourceIds":[1,2],"verification":"已核验/交叉核验/待核验"}]}],"notes":["关键人才集群、风险或待核验事项"]}。
+
+联网来源：
+${sourceText}`
+        : `你是一级市场投资机构的资深人物尽调分析师。调查对象是自然人，不是动物、宠物、物种、产品、影视角色或其他同名实体。人物姓名：${name}；公司/机构：${company || "待核验"}；角色：${role || "待核验"}；用户关注：${focus || "履历真实性、融资历史、产业资源与潜在风险"}。
+请自动执行深度人物调查，并输出专业报告：
+1. 身份确认与同名消歧：说明确认依据，列出仍可能混淆的同名人物，绝不合并不同人的经历。
+2. 核心结论：用一段话概括其真实身份、影响力、投资相关性和最重要风险。
+3. 履历时间线：教育、任职、创业、关键职位变化；逐项标注年份、机构和[来源序号]。
+4. 专业成果与产业贡献：论文、专利、产品、项目、奖项、商业化结果；区分本人贡献与所在机构成果。
+5. 商业与资本关系：创办/任职企业、股东或融资关系、合作伙伴、共同投资人及可能的利益关联。
+6. 人物关系网络：重要导师、合伙人、联合创始人、核心团队及产业联系，只写有来源支持的关系。
+7. 公开表达与行为风格：基于访谈、演讲和公开材料归纳观点，并标明这是“基于公开材料的分析”。
+8. 争议与风险核验：诉讼、处罚、履历冲突、关联交易、舆情与信息缺口；没有证据时明确写“未在本次来源中发现”，不能写“无风险”。
+9. 投资判断与待核验清单：给出可信度分级、红旗事项、后续访谈对象和至少10个针对性访谈问题。
+每项事实尽量用[序号]引用来源；区分“事实、来源主张、分析推断”；不得虚构，不得把搜索摘要当作最终事实。
+
+联网来源：
+${sourceText}`;
+      const answer = await callAgentTask(prompt, { taskType: "people-research", peopleMode, query });
+      const sourceHtml = `<h3>联网来源</h3><ol>${sources.map((item) => `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a><p>${escapeHtml(item.snippet)}</p></li>`).join("")}</ol>`;
+      const title = peopleMode === "direction" ? `${direction} 人才搜集` : `${company || ""}-${name}人物调查`;
+      let resultHtml;
+      if (peopleMode === "direction") {
+        try { resultHtml = renderPeopleDiscovery(parseJsonPayload(answer), sources); } catch { resultHtml = markdownToHtml(answer); }
+      } else {
+        resultHtml = markdownToHtml(answer);
+      }
+      currentPeopleReport = { title, html: `${resultHtml}${sourceHtml}` };
+      $("#peopleOutput").innerHTML = currentPeopleReport.html;
     const record = {
       id: makeId(),
-      name: $("#personNameInput").value.trim() || "未命名人物",
-      company: $("#personCompanyInput").value.trim() || "未标注公司",
-      role: $("#personRoleInput").value.trim(),
-      focus: $("#personFocusInput").value.trim(),
+      mode: peopleMode,
+      direction,
+      name: peopleMode === "direction" ? direction : name || "未命名人物",
+      company: peopleMode === "person" ? company || "未标注公司" : "",
+      role,
+      focus,
       notes: $("#personNotesInput").value.trim(),
       report: currentPeopleReport,
       createdAt: new Date().toISOString(),
@@ -1028,6 +1092,27 @@ function bindPeople() {
     saveState();
     renderPeopleRecords();
     addHistory(`生成人物调查：${currentPeopleReport.title}`, "人物调查");
+      toast("联网人物调查已完成。");
+    } catch (error) {
+      const reason = friendlyRequestError(error);
+      const failedName = peopleMode === "direction" ? direction : name;
+      const failedRecord = {
+        id: makeId(), mode: peopleMode, direction: peopleMode === "direction" ? direction : "",
+        name: failedName || "未命名调查", company: peopleMode === "person" ? company || "未标注公司" : "",
+        role: "", focus: peopleMode === "person" ? focus : "", notes: "",
+        status: "failed", failureReason: reason,
+        report: { title: `${failedName || "人物"}调查失败`, html: `<h2>调查未完成</h2><p><strong>失败原因：</strong>${escapeHtml(reason)}</p><p>可以缩小调查范围、补充公司/机构信息后重新执行。</p>` },
+        createdAt: new Date().toISOString(),
+      };
+      state.peopleRecords.unshift(failedRecord);
+      state.peopleRecords = state.peopleRecords.slice(0, 30);
+      saveState();
+      renderPeopleRecords();
+      toast(`人物调查失败：${reason}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = peopleMode === "direction" ? "开始找人" : "开始调查";
+    }
   });
   $("#savePeopleBtn").addEventListener("click", () => {
     if (!currentPeopleReport) return toast("请先生成一份人物调查。");
@@ -1036,17 +1121,108 @@ function bindPeople() {
   });
 }
 
+function setPeopleMode(mode) {
+  peopleMode = mode === "person" ? "person" : "direction";
+  if (peopleMode === "direction") {
+    $("#personNameInput").value = "";
+    $("#personCompanyInput").value = "";
+    $("#personRoleInput").value = "";
+  } else {
+    $("#personDirectionInput").value = "";
+    $("#personNameInput").value = "";
+    $("#personCompanyInput").value = "";
+    $("#personRoleInput").value = "";
+  }
+  $$('[data-people-mode]').forEach((button) => button.classList.toggle("active", button.dataset.peopleMode === peopleMode));
+  $("#peopleDirectionFields").hidden = peopleMode !== "direction";
+  $("#peopleSpecificFields").hidden = peopleMode !== "person";
+  $("#personNotesInput").hidden = peopleMode !== "person";
+  $("#runPeopleBtn").textContent = peopleMode === "direction" ? "开始找人" : "开始调查";
+}
+
+async function planPersonQueries(name) {
+  const prompt = `你是人物检索规划助手。用户只输入了中文姓名“${name}”。请生成 6 条用于公开网页检索同名人物的精确查询词，覆盖企业负责人、投资人、高校教授、科研人员和公众人物。查询词必须包含完整姓名，并尽量加入可能的机构、职务或专业方向。这里只生成检索假设，不把身份当作事实。严格返回 JSON 数组，例如：["${name} 某机构 董事长","${name} 某大学 教授"]。`;
+  try {
+    const answer = await callAgentTask(prompt, { taskType: "people-research", peopleMode: "query-planning" });
+    const parsed = parseJsonPayload(answer);
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item.includes(name)).slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getPersonAliases(name) {
+  const aliases = {
+    "马斯克": ["Elon Musk", "埃隆·马斯克", "埃隆马斯克"],
+    "贝索斯": ["Jeff Bezos", "杰夫·贝索斯"],
+    "比尔盖茨": ["Bill Gates", "比尔·盖茨"],
+    "黄仁勋": ["Jensen Huang"],
+    "扎克伯格": ["Mark Zuckerberg", "马克·扎克伯格"],
+  };
+  return aliases[String(name || "").replace(/[·\s]/g, "")] || [];
+}
+
+async function searchPeopleSources(queries, requiredName = "", personOnly = false, aliases = []) {
+  const responses = await Promise.allSettled(queries.map(async (query) => {
+    const response = await fetch(apiUrl(`/api/web-search?q=${encodeURIComponent(query)}`), { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "联网搜索失败");
+    return data.results || [];
+  }));
+  const rows = responses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value);
+  let unique = [...new Map(rows.map((item) => [item.url, item])).values()];
+  if (requiredName) {
+    const identityTerms = [requiredName, ...aliases].filter(Boolean);
+    const exact = unique.filter((item) => identityTerms.some((term) => `${item.title} ${item.snippet}`.toLowerCase().includes(term.toLowerCase())));
+    unique = exact;
+  }
+  if (personOnly) {
+    const excluded = /动物|宠物|犬|猫|物种|饲养|兽医|影视角色|游戏角色|动漫角色|小说人物/;
+    const humanSignals = /公司|集团|大学|学院|研究院|教授|博士|研究员|院士|董事|总经理|创始人|投资人|任职|履历|简历|访谈|演讲|先生|女士|法定代表人/;
+    unique = unique.filter((item) => {
+      const text = `${item.title} ${item.snippet}`;
+      return !excluded.test(text) && (humanSignals.test(text) || text.includes(requiredName));
+    });
+  }
+  unique = unique.slice(0, 24);
+  if (!unique.length) throw new Error("联网搜索没有找到可用来源，请调整关键词");
+  return unique;
+}
+
+function renderPeopleDiscovery(data, sources) {
+  const groups = Array.isArray(data?.groups) ? data.groups : [];
+  const groupHtml = groups.map((group) => {
+    const people = Array.isArray(group.people) ? group.people : [];
+    const rows = people.map((person) => {
+      const sourceLinks = (person.sourceIds || []).map((id) => {
+        const source = sources[Number(id) - 1];
+        return source ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">[${Number(id)}]</a>` : "";
+      }).join(" ");
+      return `<tr><td><strong>${escapeHtml(person.name || "待核验")}</strong></td><td>${escapeHtml(person.institution || "待核验")}<br><small>${escapeHtml(person.role || "")}</small></td><td>${escapeHtml(person.contribution || "待核验")} ${sourceLinks}</td><td><span class="verification-badge">${escapeHtml(person.verification || "待核验")}</span></td></tr>`;
+    }).join("");
+    return `<section class="people-discovery-group"><h3>${escapeHtml(group.title || "人物分组")}</h3><p>${escapeHtml(group.description || "")}</p><div class="table-scroll"><table class="people-discovery-table"><thead><tr><th>姓名</th><th>国家/机构与角色</th><th>核心贡献</th><th>核验</th></tr></thead><tbody>${rows || '<tr><td colspan="4">暂无有来源支持的人物</td></tr>'}</tbody></table></div></section>`;
+  }).join("");
+  const notes = Array.isArray(data?.notes) ? `<h3>待核验事项</h3><ul>${data.notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+  return `<h2>${escapeHtml(data?.title || "人物图谱与综述")}</h2><p>${escapeHtml(data?.summary || "")}</p>${groupHtml}${notes}`;
+}
+
 function bindSourcing() {
   const open = () => { $("#screeningModal").hidden = false; $("#nlSearchInput").focus(); };
   const close = () => { $("#screeningModal").hidden = true; };
   $("#openScreeningModalBtn").addEventListener("click", open);
+  $("#sidebarNewScreeningBtn").addEventListener("click", open);
   $("#newScreeningBtn").addEventListener("click", open);
   $("#closeScreeningModalBtn").addEventListener("click", close);
   $("#cancelScreeningBtn").addEventListener("click", close);
   $("#screeningModal").addEventListener("click", (event) => { if (event.target.id === "screeningModal") close(); });
   $("#runSourcingBtn").addEventListener("click", runTargetScreening);
   $("#exportScreeningBtn").addEventListener("click", exportScreeningResults);
+  $("#shareScreeningBtn").addEventListener("click", shareScreeningResults);
   $("#screeningSearch").addEventListener("input", renderSavedScreenings);
+  $("#screeningSearch").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); executeQuickScreening(); }
+  });
+  $("#screeningQuickSearchBtn").addEventListener("click", executeQuickScreening);
   $("#savedScreeningList").addEventListener("click", (event) => {
     const deleteButton = event.target.closest("[data-delete-screening]");
     if (deleteButton) {
@@ -1063,9 +1239,56 @@ function bindSourcing() {
     const screening = state.screenings.find((item) => item.id === button.dataset.screeningId);
     if (!screening) return;
     state.currentScreeningResults = screening.results || [];
+    $("#nlSearchInput").value = screening.query || "";
     saveState();
     renderCompanies();
   });
+  $("#companyGrid").addEventListener("click", (event) => {
+    const deepButton = event.target.closest("[data-deep-company]");
+    const addButton = event.target.closest("[data-add-company]");
+    const contactButton = event.target.closest("[data-contact-company]");
+    if (deepButton) {
+      const company = state.currentScreeningResults.find((item) => item.name === deepButton.dataset.deepCompany);
+      if (!company) return;
+      return openCompanyDeepResearch(company);
+    }
+    if (addButton) return addCompanyProject(addButton.dataset.addCompany);
+    if (contactButton) toast(`已记录联系需求：${contactButton.dataset.contactCompany}。请在投资项目中补充联系人。`);
+  });
+  $("#screeningRecommendations").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-deep-company]");
+    if (!button) return;
+    const company = state.currentScreeningResults.find((item) => item.name === button.dataset.deepCompany);
+    if (!company) return;
+    openCompanyDeepResearch(company);
+  });
+}
+
+function openCompanyDeepResearch(company) {
+  switchView("research");
+  researchMode = "deep";
+  $$('[data-research-mode]').forEach((button) => button.classList.toggle("active", button.dataset.researchMode === "deep"));
+  $("#industryInput").value = `${company.name}深度分析`;
+  $("#deliverableInput").value = "行业研究报告";
+  $("#depthInput").value = "深度尽调前置";
+  $("#focusInput").value = "商业模式、融资历史、核心团队、竞争优势、客户与供应链、财务质量、潜在风险";
+  $("#researchPromptInput").value = `请对${company.name}开展深度投资研究。已知信息：${company.intro || "待核验"}。请联网核验公司主体、产品技术、市场空间、竞争格局、融资与股东、核心团队、客户供应链、经营质量及风险，并给出投资判断与后续尽调清单。`;
+  $("#researchPromptInput").focus();
+}
+
+function executeQuickScreening() {
+  const query = $("#screeningSearch").value.trim();
+  if (!query) return toast("请输入筛选要求。");
+  const saved = state.screenings.find((item) => item.query.toLowerCase() === query.toLowerCase());
+  if (saved) {
+    state.currentScreeningResults = saved.results || [];
+    $("#nlSearchInput").value = saved.query;
+    saveState();
+    renderCompanies();
+    return toast("已打开历史筛选。");
+  }
+  $("#nlSearchInput").value = query;
+  runTargetScreening();
 }
 
 function bindReports() {
@@ -1143,11 +1366,12 @@ function isTaskDue(task, now = new Date()) {
 
 function friendlyRequestError(error) {
   const message = String(error?.message || error || "未知错误");
+  if (/aborted|aborterror/i.test(message)) return "任务已由用户停止";
   if (/failed to fetch|networkerror|load failed|signal is aborted/i.test(message)) {
-    return "无法连接云端模型接口，请检查 Worker 部署、网络和火山方舟服务状态";
+    return "无法连接本地大模型服务，请确认 server.mjs 正在运行且 8787 端口可访问";
   }
   if (/api key|401|unauthorized/i.test(message)) return "大模型 API Key 无效或已过期，请在模型设置中更新";
-  if (/timeout|timed out/i.test(message)) return "大模型响应超时，请稍后重试";
+  if (/timeout|timed out|超过.*秒|超过.*分钟/i.test(message)) return "任务执行超时：联网检索或大模型在限定时间内未完成，请缩小调查范围后重试";
   return message;
 }
 
@@ -1170,12 +1394,16 @@ function bindTasks() {
     const template = templates[key] || templates.custom;
     $("#taskModalTitle").textContent = template[0];
     $("#taskNameInput").value = template[0];
+    const subjectLabels = { weekly: "行业/赛道", target: "公司列表", competitor: "竞品公司列表", financing: "赛道/技术方向", post: "被投企业列表", custom: "任务主题" };
+    $("#taskSubjectLabel").textContent = subjectLabels[key] || "任务主题";
+    $("#taskSubjectInput").value = "";
     const weekly = template[1].includes("每周");
     $("#taskCadenceInput").value = weekly ? "weekly" : "daily";
     $("#taskWeekdayInput").value = "1";
     $("#taskHourInput").value = String(Number(template[1].match(/(\d{1,2}):/)?.[1] || 9));
     updateScheduleFields();
-    $("#taskPromptInput").value = template[2];
+    $("#taskPromptInput").value = "";
+    $("#taskModal").dataset.templateKey = key;
     $("#taskModal").hidden = false;
   };
   $$('[data-task-template]').forEach((button) => button.addEventListener("click", () => open(button.dataset.taskTemplate)));
@@ -1184,6 +1412,12 @@ function bindTasks() {
   $("#cancelTaskBtn").addEventListener("click", close);
   $("#taskModal").addEventListener("click", (event) => { if (event.target.id === "taskModal") close(); });
   $("#addTaskBtn").addEventListener("click", () => {
+    const subjects = $("#taskSubjectInput").value.trim();
+    if (!subjects) return toast(`请填写${$("#taskSubjectLabel").textContent}。`);
+    const focusDimensions = $$("#taskFocusGrid input:checked").map((input) => input.value);
+    const basePrompt = templates[$("#taskModal").dataset.templateKey]?.[2] || templates.custom[2];
+    const extraPrompt = $("#taskPromptInput").value.trim();
+    const resultMode = document.querySelector('input[name="taskResultMode"]:checked')?.value || "report";
     const task = {
       id: makeId(),
       name: $("#taskNameInput").value.trim() || "未命名任务",
@@ -1191,7 +1425,10 @@ function bindTasks() {
       weekday: Number($("#taskWeekdayInput").value),
       hour: Number($("#taskHourInput").value),
       cadence: formatTaskCadence($("#taskCadenceInput").value, Number($("#taskWeekdayInput").value), Number($("#taskHourInput").value)),
-      prompt: $("#taskPromptInput").value.trim(),
+      subjects,
+      focusDimensions,
+      resultMode,
+      prompt: `${basePrompt}\n对象：${subjects}\n关注维度：${focusDimensions.join("、") || "综合跟踪"}${extraPrompt ? `\n其他要求：${extraPrompt}` : ""}\n结果处理：${resultMode === "email" ? "发送邮件" : "保存到报告中心"}`,
       lastResult: "等待执行",
       active: true,
       createdAt: new Date().toISOString(),
@@ -1292,6 +1529,74 @@ function bindBoard() {
   applyBoardMode();
 }
 
+function bindFavorites() {
+  $("#favoriteSearchInput").addEventListener("input", renderFavorites);
+  $("#favoriteList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-history-kind]");
+    if (button) openHistoryCenterItem(button.dataset.historyKind, button.dataset.historyId);
+  });
+  $$('[data-favorite-filter]').forEach((button) => button.addEventListener("click", () => {
+    favoriteFilter = button.dataset.favoriteFilter;
+    $$('[data-favorite-filter]').forEach((item) => item.classList.toggle("active", item === button));
+    renderFavorites();
+  }));
+  $$('[data-favorite-sort]').forEach((button) => button.addEventListener("click", () => {
+    favoriteSort = button.dataset.favoriteSort;
+    $$('[data-favorite-sort]').forEach((item) => item.classList.toggle("active", item === button));
+    renderFavorites();
+  }));
+}
+
+function openHistoryCenterItem(kind, id) {
+  if (kind === "chat") {
+    selectChatSession(id);
+    return switchView("ask");
+  }
+  if (kind === "screening") {
+    const item = state.screenings.find((row) => row.id === id);
+    if (item) state.currentScreeningResults = item.results || [];
+    saveState(); renderCompanies(); return switchView("sourcing");
+  }
+  if (kind === "report") return openReportEditor(id);
+  if (kind === "task") {
+    switchView("tasks");
+    return window.setTimeout(() => document.querySelector(`[data-task-card-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  }
+  if (kind === "project") return openProjectDetail(id);
+  if (kind === "research") {
+    const record = state.researchRecords.find((row) => row.id === id);
+    if (record) {
+      currentReport = record.report;
+      $("#industryInput").value = record.industry || "";
+      $("#deliverableInput").value = record.deliverable || "行业研究报告";
+      $("#depthInput").value = record.depth || "标准研究";
+      $("#focusInput").value = record.focus || "";
+      $("#researchPromptInput").value = record.requirement || "";
+      renderResearchOutput(currentReport);
+    }
+    return switchView("research");
+  }
+  if (kind === "person") {
+    const record = state.peopleRecords.find((row) => row.id === id);
+    if (record) {
+      setPeopleMode(record.mode || "person");
+      $("#personDirectionInput").value = record.direction || "";
+      $("#personNameInput").value = record.name || "";
+      $("#personCompanyInput").value = record.company || "";
+      $("#personRoleInput").value = record.role || "";
+      $("#personFocusInput").value = record.focus || "";
+      currentPeopleReport = record.report;
+      $("#peopleOutput").innerHTML = currentPeopleReport?.html || "";
+    }
+    return switchView("people");
+  }
+  if (kind === "favorite") {
+    const item = state.favorites.find((row) => row.id === id);
+    const view = item?.type === "标的" ? "sourcing" : item?.type === "报告" ? "reports" : item?.type === "项目" ? "projects" : "favorites";
+    return switchView(view);
+  }
+}
+
 function bindProjects() {
   const openModal = (project = null) => {
     editingProjectId = project?.id || null;
@@ -1305,6 +1610,9 @@ function bindProjects() {
     $("#projectAmountInput").value = project?.amount || "";
     $("#projectEquityInput").value = project?.equity || "";
     $("#projectNoteInput").value = project?.note || "";
+    const templateInput = document.querySelector(`input[name="projectTemplate"][value="${CSS.escape(project?.ddTemplate || "少数股权投资")}"]`) || document.querySelector('input[name="projectTemplate"]');
+    if (templateInput) templateInput.checked = true;
+    $$("[data-project-sector]").forEach((button) => button.classList.toggle("active", button.dataset.projectSector === (project?.sectorCategory || "")));
     $("#projectModal").hidden = false;
     $("#projectNameInput").focus();
   };
@@ -1313,11 +1621,20 @@ function bindProjects() {
   $("#closeProjectModalBtn").addEventListener("click", closeModal);
   $("#cancelProjectBtn").addEventListener("click", closeModal);
   $("#projectModal").addEventListener("click", (event) => { if (event.target.id === "projectModal") closeModal(); });
+  $$("[data-project-sector]").forEach((button) => button.addEventListener("click", () => {
+    $$("[data-project-sector]").forEach((item) => item.classList.toggle("active", item === button));
+    if (button.dataset.projectSector) $("#projectSectorInput").value = button.dataset.projectSector;
+  }));
   $("#openBpAnalysisBtn").addEventListener("click", () => switchView("bpAnalysis"));
   $("#openDdProjectBtn").addEventListener("click", () => state.projects.length ? openProjectDetail(state.projects[0].id) : openModal());
   $("#bpFileInput").addEventListener("change", async (event) => {
     [bpDocument] = await readFiles(event.target.files);
     $("#bpFileHint").textContent = bpDocument ? `已选择：${bpDocument.name}` : "请先上传 BP 文件";
+  });
+  $("#bpDimensionGrid").addEventListener("change", () => {
+    const selected = $$("#bpDimensionGrid input:checked").length;
+    const counter = $(".bp-section-head span", $("#bpAnalysisView"));
+    if (counter) counter.textContent = `已选 ${selected}/7`;
   });
   $("#runBpAnalysisBtn").addEventListener("click", runBpAnalysis);
   $("#saveTargetCompanyBtn").addEventListener("click", saveTargetCompany);
@@ -1333,6 +1650,8 @@ function bindProjects() {
       amount: $("#projectAmountInput").value.trim(),
       equity: $("#projectEquityInput").value.trim(),
       note: $("#projectNoteInput").value.trim(),
+      ddTemplate: document.querySelector('input[name="projectTemplate"]:checked')?.value || "少数股权投资",
+      sectorCategory: $("[data-project-sector].active")?.dataset.projectSector || "",
     };
     if (existing) {
       Object.assign(existing, values, { updatedAt: new Date().toISOString() });
@@ -1354,7 +1673,7 @@ function bindProjects() {
 }
 
 function bindHistory() {
-  $("#clearHistoryBtn").addEventListener("click", () => {
+  $("#clearHistoryBtn")?.addEventListener("click", () => {
     state.history = [];
     saveState();
     renderAll();
@@ -1533,7 +1852,7 @@ function renderSidebar() {
     ? state.projects.slice(0, 4).map((p) => `<button class="side-row" data-view-jump="projects"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.stage)}</span></button>`).join("")
     : `<div class="sidebar-empty">暂无项目</div>`;
   $("#sidebarHistory").innerHTML = state.history.length
-    ? state.history.slice(0, 7).map((h) => `<button class="side-row" data-view-jump="history"><b>${escapeHtml(h.type)} ${escapeHtml(h.title)}</b><span>${formatDate(h.createdAt)}</span></button>`).join("")
+    ? state.history.slice(0, 7).map((h) => `<button class="side-row" data-view-jump="favorites"><b>${escapeHtml(h.type)} ${escapeHtml(h.title)}</b><span>${formatDate(h.createdAt)}</span></button>`).join("")
     : `<div class="sidebar-empty">暂无历史</div>`;
   $$("[data-view-jump]").forEach((button) => {
     button.onclick = () => switchView(button.dataset.viewJump);
@@ -1592,34 +1911,18 @@ function renderCompanies() {
   const rows = candidates
     .map((company) => ({ ...company, score: company.score || scoreCompany(company, { sector, round, region, nl }) }))
     .sort((a, b) => b.score - a.score);
-  $("#companyGrid").innerHTML = rows.length ? rows
-    .map(
-      (company) => `
-      <article class="company-card">
-        <div><strong>${escapeHtml(company.name)}</strong><small>${escapeHtml(company.sector)} · ${escapeHtml(company.region)} · ${escapeHtml(company.round)} · ${escapeHtml(company.revenue)}</small></div>
-        <p class="meta-line">${escapeHtml(company.intro)}</p>
-        <div class="score-line"><div class="score-bar"><span style="width:${company.score}%"></span></div><b>${company.score}</b></div>
-        <div class="tag-row">${(company.tags || ["待核验"]).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-        <small>${escapeHtml(company.financing)}</small>
-        <small>核验：${escapeHtml(company.verificationStatus || "待核验")} · 来源：${escapeHtml(company.sourceName || "未提供公开来源")}</small>
-        <div class="row-actions">
-          <button class="secondary-button" data-add-company="${escapeHtml(company.name)}">加入项目</button>
-          <button class="secondary-button" data-fav-company="${escapeHtml(company.name)}">收藏</button>
-        </div>
-      </article>`,
-    )
-    .join("") : "";
+  $("#companyGrid").innerHTML = rows.length ? `<table class="sourcing-result-table"><thead><tr><th>#</th><th>公司名</th><th>简介</th><th>行业</th><th>注册地</th><th>融资轮次</th><th>融资额</th><th>投资方/来源</th><th>融资日期</th><th>操作</th></tr></thead><tbody>${rows.map((company, index) => `<tr><td>${index + 1}</td><td><strong>${escapeHtml(company.name)}</strong></td><td>${escapeHtml(company.intro || "待核验")}</td><td>${escapeHtml(company.sector || "待核验")}</td><td>${escapeHtml(company.registeredLocation || company.region || "待核验")}</td><td>${escapeHtml(company.round || "待核验")}</td><td>${escapeHtml(company.financingAmount || company.revenue || "待核验")}</td><td>${escapeHtml(company.investors || company.sourceName || "待核验")}</td><td>${escapeHtml(company.financingDate || "待核验")}</td><td><div class="sourcing-row-actions"><button data-deep-company="${escapeHtml(company.name)}">深度分析</button><button class="primary-button" data-add-company="${escapeHtml(company.name)}">加入看板</button><button data-contact-company="${escapeHtml(company.name)}">联系</button></div></td></tr>`).join("")}</tbody></table>` : "";
   $("#sourcingEmpty").hidden = rows.length > 0;
   $(".sourcing-result-head").hidden = rows.length === 0;
   const verifiedCount = rows.filter((item) => item.verificationStatus === "已核验").length;
   $("#screeningSummary").textContent = rows.length ? `找到 ${rows.length} 家候选公司；${verifiedCount} 家附有核验来源，其余需进一步核验。` : "尚未执行筛选";
-  $$("[data-add-company]").forEach((button) => (button.onclick = () => addCompanyProject(button.dataset.addCompany)));
-  $$("[data-fav-company]").forEach((button) => {
-    button.onclick = () => {
-      const company = [...state.currentScreeningResults, ...sampleCompanies].find((item) => item.name === button.dataset.favCompany);
-      addFavorite("标的", company.name, company.intro);
-    };
-  });
+  $("#screeningConditionBar").hidden = rows.length === 0;
+  $("#screeningResultCount").textContent = `${rows.length} 条结果`;
+  const latest = state.screenings[0];
+  $("#screeningResultTitle").textContent = ($("#nlSearchInput").value || latest?.query || "筛选结果").slice(0, 30);
+  $("#screeningAiSummary").hidden = rows.length === 0;
+  $("#screeningAiSummaryText").textContent = rows.length ? `本次共获得 ${rows.length} 家候选标的，重点集中在${[...new Set(rows.map((item) => item.sector))].slice(0, 3).join("、")}；建议优先核验融资、客户与核心团队。` : "";
+  $("#screeningRecommendations").innerHTML = rows.slice(0, 3).map((item) => `<button data-deep-company="${escapeHtml(item.name)}"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.sector)}</span></button>`).join("");
 }
 
 async function runTargetScreening() {
@@ -1630,15 +1933,15 @@ async function runTargetScreening() {
   button.textContent = "AI 筛选中...";
   const filters = { sector: $("#sectorFilter").value, round: $("#roundFilter").value, region: $("#regionFilter").value, recency: $("#recencyFilter").value };
   try {
-    button.textContent = "正在搜集 20 条标的...";
+    button.textContent = "正在搜集候选标的...";
     const rows = await requestScreeningCandidates(query, filters);
-    const uniqueRows = dedupeScreeningRows(rows).slice(0, 20);
+    const uniqueRows = dedupeScreeningRows(rows).slice(0, 100);
     state.currentScreeningResults = uniqueRows.map((item) => normalizeScreeningCompany(item, filters));
     if (!state.currentScreeningResults.length) throw new Error("没有找到符合结构化条件的候选公司，请放宽筛选条件");
     const savedScreening = { id: makeId(), query, filters, results: state.currentScreeningResults, createdAt: new Date().toISOString() };
     state.screenings.unshift(savedScreening);
     state.screenings = state.screenings.slice(0, 30);
-    const screeningJob = completedAgentJobs.find((job) => job.label === "标的搜集 · 20条" && !job.targetId);
+    const screeningJob = completedAgentJobs.find((job) => /标的搜集/.test(job.label) && !job.targetId);
     if (screeningJob) {
       screeningJob.targetId = savedScreening.id;
       screeningJob.view = "sourcing";
@@ -1649,8 +1952,16 @@ async function runTargetScreening() {
     $("#screeningModal").hidden = true;
     renderCompanies();
     renderSavedScreenings();
-    toast(state.currentScreeningResults.length === 20 ? "已生成并去重 20 家候选标的。" : `仅获得 ${state.currentScreeningResults.length} 家有效候选，未使用虚构公司补足。`);
+    toast(`已生成并去重 ${state.currentScreeningResults.length} 家有效候选，未使用虚构公司补足。`);
   } catch (error) {
+    const screeningJob = completedAgentJobs.find((job) => /标的搜集/.test(job.label) && !job.targetId);
+    if (screeningJob) {
+      screeningJob.status = "error";
+      screeningJob.detail = `结果未形成：${friendlyRequestError(error)}`;
+      screeningJob.finishedAt = Date.now();
+      saveJobHistory();
+      renderJobCenter();
+    }
     toast(`筛选失败：${error.message}`);
   } finally {
     button.disabled = false;
@@ -1659,12 +1970,17 @@ async function runTargetScreening() {
 }
 
 async function requestScreeningCandidates(query, filters) {
-  const prompt = `你是严谨的一级市场标的筛选分析师。请一次返回 20 家真实存在、名称可公开检索的候选公司。必须尽量返回完整 20 家，不得虚构公司，不得使用“某公司”等占位名称，不得重复。
+  const prompt = `你是严谨的一级市场标的筛选分析师。请返回符合条件且真实存在、名称可公开检索的候选公司，最多100家。按实际可靠结果返回，不得为了凑数补足，不得虚构公司，不得使用“某公司”等占位名称，不得重复。
 筛选要求：${query}
 行业：${filters.sector || "不限"}；轮次：${filters.round || "不限"}；地区：${filters.region || "不限"}；最近融资：${filters.recency}
-请兼顾产业链核心、技术创新、成长性和产业协同，使用紧凑 JSON。严格输出 JSON 数组，不要输出解释。每项字段：name（公司公开全称）、sector、round、region、revenue、intro、financing、tags（数组）、reason、score（0-100）、sourceName（可核验的公开来源名称）、sourceUrl（确知时填写，否则空字符串）。无法确认的融资、营收和轮次必须填写“待核验”，禁止猜测精确数字。`;
+请兼顾产业链核心、技术创新、成长性和产业协同，使用尽可能紧凑的 JSON。严格输出 JSON 数组，不要输出解释。每项字段：name（公司公开全称）、sector、round、region、registeredLocation、intro（限80字）、financingAmount、investors、financingDate、reason（限50字）、score（0-100）、sourceName、sourceUrl。无法确认的字段填写“待核验”，禁止猜测精确数字。接近输出上限时立即停止增加公司，并正确闭合当前对象和数组，完整格式优先于数量。`;
   const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000, minimalContext: true });
-  const parsed = parseJsonPayload(answer);
+  let parsed;
+  try {
+    parsed = parseJsonPayload(answer);
+  } catch {
+    parsed = recoverJsonArray(answer);
+  }
   if (Array.isArray(parsed)) return parsed;
   if (Array.isArray(parsed?.companies)) return parsed.companies;
   if (Array.isArray(parsed?.results)) return parsed.results;
@@ -1692,6 +2008,10 @@ function normalizeScreeningCompany(item, filters) {
     revenue: item.revenue || "待核验",
     intro: item.intro || item.reason || "候选信息待核验",
     financing: item.financing || "待核验",
+    registeredLocation: item.registeredLocation || item.region || "待核验",
+    financingAmount: item.financingAmount || "待核验",
+    investors: item.investors || "待核验",
+    financingDate: item.financingDate || "待核验",
     tags: Array.isArray(item.tags) ? item.tags.slice(0, 6) : ["待核验"],
     reason: item.reason || "符合筛选条件，需进一步核验",
     score: Math.max(0, Math.min(100, Number(item.score) || 70)),
@@ -1706,17 +2026,28 @@ function exportScreeningResults() {
   if (!rows.length) return toast("请先执行标的筛选。");
   const columns = ["公司名称", "行业", "轮次", "地区", "营收", "融资情况", "匹配理由", "评分", "核验状态", "公开来源", "来源链接"];
   const values = rows.map((item) => [item.name, item.sector, item.round, item.region, item.revenue, item.financing, item.reason, item.score, item.verificationStatus || "待核验", item.sourceName || "", item.sourceUrl || ""]);
-  const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const blob = new Blob(["\ufeff", [columns, ...values].map((row) => row.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const table = `<table><tr>${columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr>${values.map((row) => `<tr>${row.map((item) => `<td>${escapeHtml(String(item ?? ""))}</td>`).join("")}</tr>`).join("")}</table>`;
+  const blob = new Blob(["\ufeff", table], { type: "application/vnd.ms-excel;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `标的筛选-${new Date().toISOString().slice(0, 10)}-${rows.length}条.csv`;
+  link.download = `标的筛选-${new Date().toISOString().slice(0, 10)}-${rows.length}条.xls`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
   toast(`已导出 ${rows.length} 条筛选结果。`);
+}
+
+async function shareScreeningResults() {
+  const rows = state.currentScreeningResults;
+  if (!rows.length) return toast("请先执行标的筛选。");
+  const text = `标的筛选结果（${rows.length}家）\n${rows.map((item, index) => `${index + 1}. ${item.name}｜${item.sector}｜${item.round}`).join("\n")}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: "标的筛选结果", text }); return; } catch {}
+  }
+  await navigator.clipboard.writeText(text);
+  toast("筛选结果已复制，可直接分享。");
 }
 
 function parseJsonPayload(text) {
@@ -1726,6 +2057,37 @@ function parseJsonPayload(text) {
   const start = arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart) ? arrayStart : objectStart;
   const end = arrayStart === start ? cleaned.lastIndexOf("]") : cleaned.lastIndexOf("}");
   return JSON.parse(start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned);
+}
+
+function recoverJsonArray(text) {
+  const source = String(text || "").replace(/```json|```/gi, "");
+  const objects = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try { objects.push(JSON.parse(source.slice(start, index + 1))); } catch {}
+        start = -1;
+      }
+    }
+  }
+  if (!objects.length) throw new Error("模型返回内容被截断，未能恢复完整公司数据");
+  return objects;
 }
 
 function renderReportCenter() {
@@ -1795,8 +2157,25 @@ function renderTemplateManager() {
 }
 
 function renderFavorites() {
-  $("#favoriteList").innerHTML = state.favorites.length
-    ? state.favorites.map((item) => `<article class="list-row"><div class="row-main"><span class="file-badge">${escapeHtml(item.type)}</span><div><strong>${escapeHtml(item.title)}</strong><small>${formatDate(item.createdAt)}</small></div></div><button class="icon-button" data-action="delete-favorite" data-id="${item.id}">×</button></article>`).join("")
+  const keyword = ($("#favoriteSearchInput")?.value || "").trim().toLowerCase();
+  const now = Date.now();
+  const items = [
+    ...state.favorites.map((item) => ({ ...item, kind: "favorite", isFavorite: true })),
+    ...state.history.map((item) => ({ ...item, kind: "history", type: "操作", content: item.type || "操作记录" })),
+    ...state.chatSessions.map((item) => ({ id: item.id, kind: "chat", type: "聊天", title: item.title, content: item.messages?.at(-1)?.content || "", createdAt: item.updatedAt || item.createdAt })),
+    ...state.screenings.map((item) => ({ id: item.id, kind: "screening", type: "标的", title: item.query, content: `${item.results?.length || 0} 条筛选结果`, createdAt: item.createdAt })),
+    ...state.reports.map((item) => ({ id: item.id, kind: "report", type: "报告", title: item.title, content: stripHtml(item.html || ""), createdAt: item.updatedAt || item.createdAt })),
+    ...state.researchRecords.map((item) => ({ id: item.id, kind: "research", type: "报告", title: item.title, content: item.requirement || "投研助手生成记录", createdAt: item.createdAt })),
+    ...state.peopleRecords.map((item) => ({ id: item.id, kind: "person", type: "人物调查", title: item.report?.title || item.name, content: item.focus || item.direction || "人物调查记录", createdAt: item.createdAt })),
+    ...state.tasks.map((item) => ({ id: item.id, kind: "task", type: "定时任务", title: item.name, content: `${item.cadence} · ${item.lastRunAt ? "已执行" : "等待执行"}`, createdAt: item.lastRunAt || item.createdAt })),
+    ...state.projects.map((item) => ({ id: item.id, kind: "project", type: "项目", title: item.name, content: `${item.sector} · ${item.stage} · ${item.owner || "待分配"}`, createdAt: item.updatedAt || item.createdAt })),
+  ];
+  const rows = items
+    .filter((item) => !keyword || `${item.title} ${item.type} ${stripHtml(item.content || "")}`.toLowerCase().includes(keyword))
+    .filter((item) => favoriteFilter === "全部" || (favoriteFilter === "收藏" ? item.isFavorite : favoriteFilter === "最近" ? item.isFavorite && now - new Date(item.createdAt).getTime() <= 7 * 86400e3 : item.type === favoriteFilter))
+    .sort((a, b) => favoriteSort === "type" ? a.type.localeCompare(b.type, "zh-CN") : favoriteSort === "title" ? a.title.localeCompare(b.title, "zh-CN") : new Date(b.createdAt) - new Date(a.createdAt));
+  $("#favoriteList").innerHTML = rows.length
+    ? rows.map((item) => `<article class="list-row favorite-row"><button class="history-center-open" data-history-kind="${item.kind}" data-history-id="${item.id}"><div><strong>${escapeHtml(item.title)}</strong><small>${formatDate(item.createdAt)}</small></div></button>${item.isFavorite ? `<button class="icon-button" data-action="delete-favorite" data-id="${item.id}" title="取消收藏">×</button>` : '<span class="history-open-arrow">›</span>'}</article>`).join("")
     : emptyState("暂无收藏");
 }
 
@@ -1846,12 +2225,25 @@ function renderPeopleRecords() {
   const root = $("#peopleRecordList");
   if (!root) return;
   const keyword = ($("#peopleRecordSearch")?.value || "").trim().toLowerCase();
-  const rows = state.peopleRecords.filter((item) => `${item.name} ${item.company} ${item.role || ""}`.toLowerCase().includes(keyword));
-  root.innerHTML = rows.length ? rows.map((item) => `<article class="people-record-row"><button class="people-record-open" data-person-record-id="${item.id}"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.company)}</span><small>${escapeHtml(item.role || "角色待补充")} · ${formatDate(item.createdAt)}</small></button><button class="people-record-delete" data-delete-person-record="${item.id}" title="删除调查记录" aria-label="删除调查记录">×</button></article>`).join("") : '<p class="sidebar-empty-light">暂无调查记录</p>';
+  const rows = state.peopleRecords.filter((item) => `${item.name} ${item.direction || ""} ${item.company || ""}`.toLowerCase().includes(keyword));
+  const renderRow = (item) => {
+    const isDirection = item.mode === "direction";
+    const title = isDirection ? (item.direction || item.name) : item.name;
+    const context = isDirection ? "人才图谱" : (item.company && item.company !== "未标注公司" ? item.company : "机构待核验");
+    const meta = `${isDirection ? "按方向找人" : "指定人物调查"}${item.status === "failed" ? ` · 失败：${item.failureReason || "未知原因"}` : ""}`;
+    return `<article class="people-record-row"><button class="people-record-open" data-person-record-id="${item.id}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(context)}</span><small>${meta} · ${formatDate(item.createdAt)}</small></button><button class="people-record-delete" data-delete-person-record="${item.id}" title="删除调查记录" aria-label="删除调查记录">×</button></article>`;
+  };
+  const directionRows = rows.filter((item) => item.mode === "direction");
+  const personRows = rows.filter((item) => item.mode !== "direction");
+  root.innerHTML = rows.length
+    ? `${directionRows.length ? `<h3 class="people-record-group-title">按方向找人</h3>${directionRows.map(renderRow).join("")}` : ""}${personRows.length ? `<h3 class="people-record-group-title">指定人物调查</h3>${personRows.map(renderRow).join("")}` : ""}`
+    : '<p class="sidebar-empty-light">暂无调查记录</p>';
 }
 
 function renderHistory() {
-  $("#historyList").innerHTML = state.history.length
+  const root = $("#historyList");
+  if (!root) return;
+  root.innerHTML = state.history.length
     ? state.history.map((item) => `<article class="list-row"><div class="row-main"><span class="file-badge">${escapeHtml(item.type)}</span><div><strong>${escapeHtml(item.title)}</strong><small>${formatDate(item.createdAt)}</small></div></div></article>`).join("")
     : emptyState("暂无历史");
 }
@@ -1892,6 +2284,8 @@ async function sendChatMessage(text) {
   $("#askAttachmentHint").textContent = "";
   $("#askChatFiles").value = "";
   chatRequestInFlight = true;
+  chatStoppedByUser = false;
+  updateChatSendButtons();
   saveState();
   renderChat(true);
 
@@ -1908,9 +2302,15 @@ async function sendChatMessage(text) {
   let answer;
   let mode = "model";
   try {
-    answer = await callChatApi();
+    const result = await callChatApi();
+    answer = result.message;
+    var usage = result.usage;
     setModelStatus("大模型已连接");
   } catch (error) {
+    if (chatStoppedByUser || error?.name === "AbortError") {
+      answer = "已停止生成。";
+      mode = "stopped";
+    } else {
     const health = await getModelHealth().catch(() => null);
     if (health?.configured) {
       answer = buildModelFailureReply(error);
@@ -1922,6 +2322,7 @@ async function sendChatMessage(text) {
       mode = "local";
       setModelStatus("本地智能回复");
     }
+    }
   }
 
   state.chatMessages = state.chatMessages.filter((message) => message.id !== thinking.id);
@@ -1931,18 +2332,48 @@ async function sendChatMessage(text) {
     content: answer,
     createdAt: new Date().toISOString(),
     mode,
+    usage,
   });
   state.chatMessages = state.chatMessages.slice(-80);
   lastAskAnswer = answer;
   chatRequestInFlight = false;
+  activeChatController = null;
+  updateChatSendButtons();
   saveState();
   addHistory(`Ask 奔奔：${text.slice(0, 24)}`, "问答");
   renderChat(true);
 }
 
+function stopChatGeneration() {
+  if (!chatRequestInFlight || !activeChatController) return;
+  chatStoppedByUser = true;
+  activeChatController.abort();
+}
+
+function updateChatSendButtons() {
+  [$("#askChatSendBtn"), $("#floatingChatSendBtn")].forEach((button) => {
+    if (!button) return;
+    button.textContent = chatRequestInFlight ? "停止" : "发送";
+    button.classList.toggle("stop-generation", chatRequestInFlight);
+  });
+}
+
+function normalizeTokenUsage(usage) {
+  if (!usage) return null;
+  const input = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens ?? 0);
+  const output = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.outputTokens ?? 0);
+  const total = Number(usage.total_tokens ?? usage.totalTokens ?? input + output);
+  return { input, output, total };
+}
+
+function formatTokenUsage(usage) {
+  return usage?.total ? ` · ${usage.total.toLocaleString("zh-CN")} Token` : "";
+}
+
 async function callChatApi() {
   if (location.protocol === "file:") throw new Error("请通过 server.mjs 启动后连接模型");
   const controller = new AbortController();
+  activeChatController = controller;
   let timedOut = false;
   const timer = window.setTimeout(() => {
     timedOut = true;
@@ -1964,11 +2395,9 @@ async function callChatApi() {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (data.error) throw new Error(data.error);
     if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型接口没有返回 message");
-    recordTokenUsage(data.usage);
-    return data.message;
+    return { message: data.message, usage: normalizeTokenUsage(data.usage) };
   } catch (error) {
     if (timedOut) throw new Error("模型响应超过 10 分钟，请重试");
     throw error;
@@ -1987,30 +2416,19 @@ async function callAgentTask(prompt, context = {}) {
     controller.abort();
   }, timeoutMs);
   try {
-    const requestBody = JSON.stringify({
-      sessionId: makeId(),
-      modelProfileId: selectedModelProfileId,
-      messages: [{ role: "user", content: prompt }],
-      context: context.minimalContext ? { ...context, minimalContext: undefined } : { ...buildAgentContext(), ...context },
-    });
+    const requestBody = JSON.stringify({ sessionId: makeId(), modelProfileId: selectedModelProfileId, messages: [{ role: "user", content: prompt }], context: context.minimalContext ? { ...context, minimalContext: undefined } : { ...buildAgentContext(), ...context } });
     let response;
     let lastNetworkError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        response = await fetch(AI_CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: requestBody, signal: controller.signal });
-        break;
-      } catch (error) {
-        lastNetworkError = error;
-        if (timedOut || attempt === 1) throw error;
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-      }
+      try { response = await fetch(AI_CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: requestBody, signal: controller.signal }); break; }
+      catch (error) { lastNetworkError = error; if (timedOut || attempt === 1) throw error; await new Promise((resolve) => window.setTimeout(resolve, 1500)); }
     }
     if (!response) throw lastNetworkError || new Error("云端模型接口没有响应");
     const data = await response.json().catch(() => ({}));
-    if (data.error) throw new Error(data.error);
     if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型没有返回内容");
-    finishAgentJob(jobId, "success", recordTokenUsage(data.usage));
+    const usage = normalizeTokenUsage(data.usage);
+    finishAgentJob(jobId, "success", usage ? `Token：输入 ${usage.input} / 输出 ${usage.output} / 合计 ${usage.total}` : "");
     return data.message;
   } catch (error) {
     if (timedOut) {
@@ -2074,7 +2492,7 @@ function renderChatMessage(message) {
   const content = escapeHtml(message.displayContent || message.content).replace(/\n/g, "<br>");
   return `<article class="chat-message ${message.role} ${message.pending ? "pending" : ""}">
     ${message.role === "assistant" ? '<span class="chat-avatar">TE</span>' : ""}
-    <div class="chat-bubble"><p>${content}</p><small>${formatDate(message.createdAt)}${message.mode === "local" ? " · 本地" : message.mode === "error" ? " · 请求失败" : ""}</small></div>
+    <div class="chat-bubble"><p>${content}</p><small>${formatDate(message.createdAt)}${message.mode === "local" ? " · 本地" : message.mode === "error" ? " · 请求失败" : message.mode === "stopped" ? " · 已停止" : ""}${formatTokenUsage(message.usage)}</small></div>
   </article>`;
 }
 
@@ -2197,6 +2615,11 @@ async function generateResearchReport() {
   const requirement = $("#researchPromptInput").value.trim();
   if (!requirement) throw new Error("请先输入研究要求或提示词");
   const sourceText = researchDocs.map((doc) => `【${doc.name}】\n${doc.text || "仅记录文件名"}`).join("\n\n").slice(0, 30000);
+  const searchQueries = researchMode === "deep"
+    ? [`${industry} 行业政策 监管`, `${industry} 市场规模 增长率`, `${industry} 产业链 核心环节`, `${industry} 竞争格局 头部公司`, `${industry} 投资 风险 融资`]
+    : [`${industry} 行业研究 市场 产业链`, `${industry} 投融资 竞争格局`];
+  const webSources = await searchPeopleSources(searchQueries);
+  const webText = webSources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n").slice(0, researchMode === "deep" ? 50000 : 24000);
   const prompt = `你是时代电气投研助手。请根据以下要求生成一份专业、完整、可提交给投资管理者的${deliverable}。
 
 研究赛道：${industry}
@@ -2204,10 +2627,13 @@ async function generateResearchReport() {
 关注重点：${focus || "由你根据任务判断"}
 用户要求：${requirement}
 参考资料：${sourceText || "暂无附件，请明确标注需要外部核验的数据"}
+研究模式：${researchMode === "deep" ? "深度研究（政策、市场、产业链、竞争与风险多维交叉验证）" : "专业研究（快速联网研究与多源验证）"}
+联网来源：\n${webText}
 
-报告必须包含：执行摘要、核心结论、行业定义与边界、市场空间与驱动因素、产业链、竞争格局、重点公司或标的、商业模式与关键指标、投资机会、主要风险、待核验事项、下一步行动。区分事实、推断和待核验项；不得虚构数据或来源。使用清晰的中文 Markdown 标题和列表。`;
-  const answer = await callAgentTask(prompt, { taskType: "research-report", industry, deliverable, depth, minimalContext: true, timeoutMs: 600000 });
+报告必须包含：执行摘要、核心结论、行业定义与边界、市场空间与驱动因素、产业链、竞争格局、重点公司或标的、商业模式与关键指标、投资机会、主要风险、待核验事项、下一步行动。联网事实必须用[序号]引用来源；区分事实、推断和待核验项；不得虚构数据或来源。使用清晰的中文 Markdown 标题和列表。`;
+  const answer = await callAgentTask(prompt, { taskType: "research-report", industry, deliverable, depth, researchMode, timeoutMs: 600000, minimalContext: true });
   const reportHtml = markdownToHtml(answer);
+  const webSourceHtml = `<h2>联网来源</h2><ol>${webSources.map((item) => `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></li>`).join("")}</ol>`;
   const local = buildResearchReport();
   const title = `${industry}${deliverable}`;
   return {
@@ -2217,10 +2643,10 @@ async function generateResearchReport() {
     depth,
     focus,
     requirement,
-    memoHtml: reportHtml,
+    memoHtml: `${reportHtml}${webSourceHtml}`,
     mapHtml: local.mapHtml,
     actionHtml: `<p>报告中的“待核验事项”和“下一步行动”已作为执行清单生成。</p>${local.actionHtml}`,
-    exportHtml: `<h1>${escapeHtml(title)}</h1>${reportHtml}`,
+    exportHtml: `<h1>${escapeHtml(title)}</h1>${reportHtml}${webSourceHtml}`,
   };
 }
 

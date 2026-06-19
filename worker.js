@@ -2,8 +2,41 @@ const SYSTEM_PROMPT = `你是奔奔，一名服务于 VC/PE、投行和行研团
 你的职责是：行业研究、标的筛选、人物调查、尽调问题设计、财务与估值分析、IC Memo 和投委会材料修改。
 回答要求：结论先行；区分事实、推断和待核验事项；涉及投资判断时列出风险；不能虚构数据或来源；信息不足时明确提出需要补充的资料。`;
 
+const DEFAULT_MODEL_PROFILES = [
+  { id: "model-1", name: "Doubao-1.5-pro-32k", mode: "chat-completions", apiUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions", model: "ep-20260618215015-wrpv7" },
+  { id: "model-2", name: "GLM-4.7", mode: "chat-completions", apiUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions", model: "ep-20260617214752-4thvz" },
+  { id: "model-3", name: "DeepSeek-V3.2", mode: "chat-completions", apiUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions", model: "ep-20260617144511-8tl99" },
+];
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...CORS_HEADERS } });
+}
+
+function decodeXml(value) {
+  return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+async function handleWebSearch(url) {
+  const query = String(url.searchParams.get("q") || "").trim();
+  if (!query) return json({ error: "搜索关键词不能为空" }, 400);
+  try {
+    const upstream = await fetch(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`, { headers: { "User-Agent": "Mozilla/5.0 Times-Electric-Research-Agent" } });
+    if (!upstream.ok) throw new Error(`搜索服务返回 ${upstream.status}`);
+    const xml = await upstream.text();
+    const results = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(0, 15).map((match) => {
+      const block = match[1];
+      const value = (tag) => decodeXml(block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
+      return { title: value("title"), url: value("link"), snippet: value("description").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() };
+    }).filter((item) => item.title && item.url);
+    return json({ query, results });
+  } catch (error) { return json({ error: `联网搜索失败：${error.message || "网络异常"}` }, 502); }
 }
 
 function envValue(env, ...names) {
@@ -68,14 +101,15 @@ async function profilesFromEnv(env) {
   const numbered = [];
   for (let index = 1; index <= 3; index += 1) {
     const prefix = `LLM_${index}`;
-    const model = await resolveValue(env, `${prefix}_MODEL`);
+    const defaults = DEFAULT_MODEL_PROFILES[index - 1];
+    const model = await resolveValue(env, `${prefix}_MODEL`) || defaults.model;
     const keyDetected = Object.keys(env).some((key) => key.trim().toUpperCase() === `${prefix}_API_KEY`);
-    if (!model && !keyDetected) continue;
+    if (!keyDetected) continue;
     numbered.push({
       id: `model-${index}`,
-      name: await resolveValue(env, `${prefix}_NAME`) || model || `模型 ${index}`,
-      mode: (await resolveValue(env, `${prefix}_MODE`) || await resolveValue(env, "LLM_API_MODE")) === "responses" ? "responses" : "chat-completions",
-      apiUrl: await resolveValue(env, `${prefix}_API_URL`) || await resolveValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      name: await resolveValue(env, `${prefix}_NAME`) || defaults.name,
+      mode: (await resolveValue(env, `${prefix}_MODE`) || await resolveValue(env, "LLM_API_MODE") || defaults.mode) === "responses" ? "responses" : "chat-completions",
+      apiUrl: await resolveValue(env, `${prefix}_API_URL`) || await resolveValue(env, "LLM_API_URL") || defaults.apiUrl,
       model: model || "",
       apiKey: await resolveApiKey(env, `${prefix}_API_KEY`),
     });
@@ -142,14 +176,16 @@ function streamChat(request, env, ctx) {
     try { await writer.write(encoder.encode(JSON.stringify({ error: error.message || "云端任务执行失败" }))); await writer.close(); } catch {}
   });
   ctx.waitUntil(work);
-  return new Response(readable, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" } });
+  return new Response(readable, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", ...CORS_HEADERS } });
 }
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
     const profiles = await profilesFromEnv(env);
     const profile = profiles[0];
+    if (url.pathname.startsWith("/api/")) console.log(JSON.stringify({ event: "api-request", path: url.pathname, method: request.method, origin: request.headers.get("Origin") || "direct", profiles: profiles.length, configuredProfiles: profiles.filter((item) => item.apiKey && item.model).length }));
     if (url.pathname === "/api/health" && request.method === "GET") {
       const rawKey = envValue(env, "LLM_API_KEY", "ARK_API_KEY");
       const missingBindings = profiles.flatMap((item, index) => {
@@ -163,6 +199,7 @@ export default {
       return json({ ...visible, profiles: profiles.map(visibleProfile), activeProfileId: profile.id, cloudManaged: true });
     }
     if (url.pathname === "/api/settings" && request.method === "POST") return json({ error: "模型配置由 Cloudflare 环境变量统一管理" }, 403);
+    if (url.pathname === "/api/web-search" && request.method === "GET") return handleWebSearch(url);
     if (url.pathname === "/api/chat" && request.method === "POST") return streamChat(request, env, ctx);
     if (url.pathname.startsWith("/api/")) return json({ error: "接口不存在" }, 404);
     return env.ASSETS.fetch(request);
