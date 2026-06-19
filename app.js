@@ -1,6 +1,6 @@
 const STORAGE_KEY = "investment-agent-mvp-state-v2";
 const JOB_HISTORY_KEY = "times-electric-agent-job-history-v1";
-const WORKER_ORIGIN = "https://teagent.tankoagent.workers.dev";
+const WORKER_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : "https://teagent.tankoagent.workers.dev";
 const apiUrl = (path) => `${WORKER_ORIGIN}${path}`;
 const AI_CONFIG = {
   endpoint: apiUrl("/api/chat"),
