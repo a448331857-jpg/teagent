@@ -12,6 +12,14 @@ function envValue(env, ...names) {
   return actual ? env[actual] : "";
 }
 
+async function resolveValue(env, ...names) {
+  const binding = envValue(env, ...names);
+  if (binding && typeof binding === "object" && typeof binding.get === "function") {
+    try { return String(await binding.get() || "").trim(); } catch { return ""; }
+  }
+  return String(binding || "").trim();
+}
+
 function cleanApiKey(value) {
   return String(value || "")
     .trim()
@@ -32,10 +40,10 @@ async function resolveApiKey(env, ...names) {
 async function profileFromEnv(env) {
   return {
     id: "default",
-    name: envValue(env, "LLM_MODEL_NAME") || envValue(env, "LLM_MODEL") || "默认模型",
-    mode: envValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
-    apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    model: envValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
+    name: await resolveValue(env, "LLM_MODEL_NAME") || await resolveValue(env, "LLM_MODEL") || "默认模型",
+    mode: await resolveValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
+    apiUrl: await resolveValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    model: await resolveValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
     apiKey: await resolveApiKey(env, "LLM_API_KEY", "ARK_API_KEY"),
   };
 }
@@ -44,14 +52,14 @@ async function profilesFromEnv(env) {
   const numbered = [];
   for (let index = 1; index <= 3; index += 1) {
     const prefix = `LLM_${index}`;
-    const model = envValue(env, `${prefix}_MODEL`);
+    const model = await resolveValue(env, `${prefix}_MODEL`);
     const keyDetected = Object.keys(env).some((key) => key.trim().toUpperCase() === `${prefix}_API_KEY`);
     if (!model && !keyDetected) continue;
     numbered.push({
       id: `model-${index}`,
-      name: envValue(env, `${prefix}_NAME`) || model || `模型 ${index}`,
-      mode: (envValue(env, `${prefix}_MODE`) || envValue(env, "LLM_API_MODE")) === "responses" ? "responses" : "chat-completions",
-      apiUrl: envValue(env, `${prefix}_API_URL`) || envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      name: await resolveValue(env, `${prefix}_NAME`) || model || `模型 ${index}`,
+      mode: (await resolveValue(env, `${prefix}_MODE`) || await resolveValue(env, "LLM_API_MODE")) === "responses" ? "responses" : "chat-completions",
+      apiUrl: await resolveValue(env, `${prefix}_API_URL`) || await resolveValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       model: model || "",
       apiKey: await resolveApiKey(env, `${prefix}_API_KEY`),
     });
@@ -132,7 +140,7 @@ export default {
         const number = item.id === "default" ? "" : String(index + 1);
         return [!item.model ? `LLM${number ? `_${number}` : ""}_MODEL` : "", !item.apiKey ? `LLM${number ? `_${number}` : ""}_API_KEY` : ""].filter(Boolean);
       });
-      return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v6", availableBindings: Object.keys(env).sort(), missingBindings, apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
+      return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v7", availableBindings: Object.keys(env).sort(), missingBindings, apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
     }
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);
