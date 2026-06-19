@@ -34,7 +34,7 @@ async function profileFromEnv(env) {
     id: "default",
     name: envValue(env, "LLM_MODEL_NAME") || envValue(env, "LLM_MODEL") || "默认模型",
     mode: envValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
-    apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
+    apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
     model: envValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
     apiKey: await resolveApiKey(env, "LLM_API_KEY", "ARK_API_KEY"),
   };
@@ -51,7 +51,7 @@ async function profilesFromEnv(env) {
       id: `model-${index}`,
       name: envValue(env, `${prefix}_NAME`) || model || `模型 ${index}`,
       mode: envValue(env, `${prefix}_MODE`) === "responses" ? "responses" : "chat-completions",
-      apiUrl: envValue(env, `${prefix}_API_URL`) || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
+      apiUrl: envValue(env, `${prefix}_API_URL`) || "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       model: model || "",
       apiKey: await resolveApiKey(env, `${prefix}_API_KEY`),
     });
