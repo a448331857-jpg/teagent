@@ -2,6 +2,8 @@ functions/**
 worker.js
 cloud-worker.js
 wrangler.jsonc
+wrangler.generated.jsonc
+deploy.mjs
 README.md
 .dev.vars*
 .gitignore

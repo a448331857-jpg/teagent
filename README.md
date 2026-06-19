@@ -17,7 +17,7 @@
 
 1. 将本目录提交到 GitHub 或 GitLab 仓库。
 2. 在 Cloudflare 控制台创建 Workers Builds 项目并连接该仓库。
-3. 部署命令使用 `npx wrangler deploy`，无需构建命令。
+3. 部署命令使用 `node deploy.mjs`，无需构建命令。该脚本会把 Builds 中的模型名称、接口和模型 ID 自动注入 Worker 运行时；不会处理或输出 API Key。
 4. 在 Worker 的“设置 → 变量和机密”中添加：
    - `LLM_API_MODE`：`chat-completions` 或 `responses`
    - `LLM_API_URL`：模型服务 API 地址
