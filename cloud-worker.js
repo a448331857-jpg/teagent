@@ -69,6 +69,7 @@ async function handleChat(request, env) {
   const profiles = await profilesFromEnv(env);
   const profile = profiles.find((item) => item.id === body.modelProfileId) || profiles[0];
   if (!profile.apiKey) return json({ error: `当前 Worker 未读取到 ${profile.id === "default" ? "LLM_API_KEY" : profile.id.replace("model-", "LLM_") + "_API_KEY"}` }, 503);
+  if (!profile.model) return json({ error: `当前 Worker 未读取到 ${profile.id === "default" ? "LLM_MODEL" : profile.id.replace("model-", "LLM_") + "_MODEL"}` }, 503);
   const messages = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
   if (!messages.length) return json({ error: "messages 不能为空" }, 400);
   const normalized = messages.map((item) => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 20000) }));
