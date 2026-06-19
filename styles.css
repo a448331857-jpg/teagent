@@ -1969,10 +1969,11 @@ html, body, .app-shell, .main, .view, .panel, .table-scroll { max-width: 100%; o
 .screening-search-box input { min-width: 0; min-height: 40px; padding: 0 10px; border: 0; outline: 0; }
 .screening-search-box button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; background: transparent; color: var(--accent-strong); }
 .screening-search-box [data-icon] { width: 18px; height: 18px; }
-#savedScreeningList { display: grid; gap: 6px; margin-top: 18px; }
-#savedScreeningList .saved-screening-row { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 4px; }
-#savedScreeningList .saved-screening-open { display: grid; gap: 4px; min-width: 0; padding: 9px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; }
+#savedScreeningList { display: grid; grid-auto-rows: 64px; align-content: start; gap: 6px; margin-top: 18px; }
+#savedScreeningList .saved-screening-row { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 4px; height: 64px; min-height: 64px; max-height: 64px; }
+#savedScreeningList .saved-screening-open { display: grid; align-content: center; gap: 4px; min-width: 0; height: 100%; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; }
 #savedScreeningList .saved-screening-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#savedScreeningList .saved-screening-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #savedScreeningList .saved-screening-open:hover { border-color: #efb5ba; background: var(--accent-soft); }
 #savedScreeningList .saved-screening-delete { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); text-align: center; }
 #savedScreeningList .saved-screening-delete:hover { background: #feecef; color: var(--accent); }
