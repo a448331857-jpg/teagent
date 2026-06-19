@@ -1906,3 +1906,4 @@ textarea:focus {
   body { padding-bottom: env(safe-area-inset-bottom); }
 }
 .job-progress-item .job-error-detail { display: block; margin-top: 6px; color: #b91c1c; white-space: normal; line-height: 1.4; word-break: break-word; }
+.job-progress-item .job-token-detail { display: block; margin-top: 6px; color: #166534; white-space: normal; line-height: 1.4; }

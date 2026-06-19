@@ -1,5 +1,6 @@
 const STORAGE_KEY = "investment-agent-mvp-state-v2";
 const JOB_HISTORY_KEY = "times-electric-agent-job-history-v1";
+const TOKEN_USAGE_KEY = "times-electric-token-usage-v1";
 const AI_CONFIG = {
   endpoint: "/api/chat",
   timeoutMs: 600000,
@@ -486,6 +487,21 @@ function saveJobHistory() {
   localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(completedAgentJobs.slice(0, 30)));
 }
 
+function recordTokenUsage(usage) {
+  if (!usage) return "";
+  const input = Number(usage.inputTokens || 0);
+  const output = Number(usage.outputTokens || 0);
+  const total = Number(usage.totalTokens || input + output);
+  const saved = JSON.parse(localStorage.getItem(TOKEN_USAGE_KEY) || '{"input":0,"output":0,"total":0,"requests":0}');
+  saved.input += input; saved.output += output; saved.total += total; saved.requests += 1;
+  localStorage.setItem(TOKEN_USAGE_KEY, JSON.stringify(saved));
+  return `Token：输入 ${input.toLocaleString()} · 输出 ${output.toLocaleString()} · 合计 ${total.toLocaleString()}`;
+}
+
+function totalTokenUsage() {
+  try { return JSON.parse(localStorage.getItem(TOKEN_USAGE_KEY) || "{}").total || 0; } catch { return 0; }
+}
+
 function getJobLabel(context = {}) {
   const labels = {
     "research-report": "生成投研报告",
@@ -588,7 +604,8 @@ function renderJobCenter() {
   const running = activeJobs.filter((job) => job.status === "running");
   $("#jobCenter").hidden = jobCenterMinimized;
   $("#jobCenterLauncher").hidden = !jobCenterMinimized || jobs.length === 0;
-  $("#jobCenterSummary").textContent = running.length ? `${running.length} 个任务正在执行` : "任务已完成";
+  const tokenTotal = totalTokenUsage();
+  $("#jobCenterSummary").textContent = running.length ? `${running.length} 个任务正在执行` : `任务已完成 · 累计 ${Number(tokenTotal).toLocaleString()} Token`;
   $("#jobLauncherText").textContent = running.length ? `${running.length} 个任务执行中` : `任务记录 ${completedAgentJobs.length}`;
   $(".job-spinner").hidden = running.length === 0;
   $("#jobCenterList").innerHTML = jobs.map((job) => {
@@ -596,7 +613,7 @@ function renderJobCenter() {
     const progress = job.status === "running" ? Math.min(90, 10 + Math.floor(elapsed / 1800)) : 100;
     const statusText = job.status === "running" ? `处理中 · ${Math.floor(elapsed / 1000)} 秒` : job.status === "success" ? "已完成" : "执行失败";
     const time = job.finishedAt || job.startedAt;
-    const detail = job.status === "error" && job.detail ? `<small class="job-error-detail">${escapeHtml(job.detail)}</small>` : "";
+    const detail = job.detail ? `<small class="${job.status === "error" ? "job-error-detail" : "job-token-detail"}">${escapeHtml(job.detail)}</small>` : "";
     return `<article class="job-progress-item ${job.status}" data-job-id="${job.id}" title="${escapeHtml(job.detail || "打开对应任务")}"><div><strong>${escapeHtml(job.label)}</strong><span>${statusText}</span></div><div class="job-progress-track"><i style="width:${progress}%"></i></div><small>${formatDate(new Date(time).toISOString())}</small>${detail}</article>`;
   }).join("") || '<p class="sidebar-empty-light">暂无任务记录</p>';
 }
@@ -1946,8 +1963,10 @@ async function callChatApi() {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
+    if (data.error) throw new Error(data.error);
     if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型接口没有返回 message");
+    recordTokenUsage(data.usage);
     return data.message;
   } catch (error) {
     if (timedOut) throw new Error("模型响应超过 10 分钟，请重试");
@@ -1987,9 +2006,10 @@ async function callAgentTask(prompt, context = {}) {
     }
     if (!response) throw lastNetworkError || new Error("云端模型接口没有响应");
     const data = await response.json().catch(() => ({}));
+    if (data.error) throw new Error(data.error);
     if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型没有返回内容");
-    finishAgentJob(jobId, "success");
+    finishAgentJob(jobId, "success", recordTokenUsage(data.usage));
     return data.message;
   } catch (error) {
     if (timedOut) {

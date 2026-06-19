@@ -21,8 +21,8 @@ function cleanApiKey(value) {
     .trim();
 }
 
-async function resolveApiKey(env) {
-  const binding = envValue(env, "LLM_API_KEY", "ARK_API_KEY");
+async function resolveApiKey(env, ...names) {
+  const binding = envValue(env, ...names);
   if (binding && typeof binding === "object" && typeof binding.get === "function") {
     try { return cleanApiKey(await binding.get()); } catch { return ""; }
   }
@@ -36,8 +36,27 @@ async function profileFromEnv(env) {
     mode: envValue(env, "LLM_API_MODE") === "responses" ? "responses" : "chat-completions",
     apiUrl: envValue(env, "LLM_API_URL") || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
     model: envValue(env, "LLM_MODEL") || "ep-20260617144511-8tl99",
-    apiKey: await resolveApiKey(env),
+    apiKey: await resolveApiKey(env, "LLM_API_KEY", "ARK_API_KEY"),
   };
+}
+
+async function profilesFromEnv(env) {
+  const numbered = [];
+  for (let index = 1; index <= 3; index += 1) {
+    const prefix = `LLM_${index}`;
+    const model = envValue(env, `${prefix}_MODEL`);
+    const keyDetected = Object.keys(env).some((key) => key.trim().toUpperCase() === `${prefix}_API_KEY`);
+    if (!model && !keyDetected) continue;
+    numbered.push({
+      id: `model-${index}`,
+      name: envValue(env, `${prefix}_NAME`) || model || `模型 ${index}`,
+      mode: envValue(env, `${prefix}_MODE`) === "responses" ? "responses" : "chat-completions",
+      apiUrl: envValue(env, `${prefix}_API_URL`) || "https://ark.cn-beijing.volces.com/api/v1/chat/completions",
+      model: model || "",
+      apiKey: await resolveApiKey(env, `${prefix}_API_KEY`),
+    });
+  }
+  return numbered.length ? numbered : [await profileFromEnv(env)];
 }
 
 function visibleProfile(profile) {
@@ -45,10 +64,11 @@ function visibleProfile(profile) {
 }
 
 async function handleChat(request, env) {
-  const profile = await profileFromEnv(env);
-  if (!profile.apiKey) return json({ error: "当前 Worker 未读取到 LLM_API_KEY" }, 503);
   let body;
   try { body = await request.json(); } catch { return json({ error: "请求格式无效" }, 400); }
+  const profiles = await profilesFromEnv(env);
+  const profile = profiles.find((item) => item.id === body.modelProfileId) || profiles[0];
+  if (!profile.apiKey) return json({ error: `当前 Worker 未读取到 ${profile.id === "default" ? "LLM_API_KEY" : profile.id.replace("model-", "LLM_") + "_API_KEY"}` }, 503);
   const messages = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
   if (!messages.length) return json({ error: "messages 不能为空" }, 400);
   const normalized = messages.map((item) => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 20000) }));
@@ -70,23 +90,51 @@ async function handleChat(request, env) {
     ? (data.output_text || (data.output || []).flatMap((item) => item.content || []).map((item) => item.text || "").filter(Boolean).join("\n"))
     : data?.choices?.[0]?.message?.content;
   if (!message) return json({ error: "模型服务未返回文本内容" }, 502);
-  return json({ message, model: data.model || profile.model, endpointId: profile.model, modelProfileId: profile.id, sessionId: body.sessionId || null });
+  const usage = data.usage ? {
+    inputTokens: Number(data.usage.prompt_tokens ?? data.usage.input_tokens ?? 0),
+    outputTokens: Number(data.usage.completion_tokens ?? data.usage.output_tokens ?? 0),
+    totalTokens: Number(data.usage.total_tokens ?? 0),
+  } : null;
+  if (usage && !usage.totalTokens) usage.totalTokens = usage.inputTokens + usage.outputTokens;
+  return json({ message, model: data.model || profile.model, endpointId: profile.model, modelProfileId: profile.id, sessionId: body.sessionId || null, usage });
+}
+
+function streamChat(request, env, ctx) {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const work = (async () => {
+    let completed = false;
+    const modelRequest = handleChat(request, env).then((response) => { completed = true; return response; });
+    while (!completed) {
+      await Promise.race([modelRequest, new Promise((resolve) => setTimeout(resolve, 15000))]);
+      if (!completed) await writer.write(encoder.encode(" \n"));
+    }
+    const response = await modelRequest;
+    await writer.write(encoder.encode(await response.text()));
+    await writer.close();
+  })().catch(async (error) => {
+    try { await writer.write(encoder.encode(JSON.stringify({ error: error.message || "云端任务执行失败" }))); await writer.close(); } catch {}
+  });
+  ctx.waitUntil(work);
+  return new Response(readable, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" } });
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const profile = await profileFromEnv(env);
+    const profiles = await profilesFromEnv(env);
+    const profile = profiles[0];
     if (url.pathname === "/api/health" && request.method === "GET") {
       const rawKey = envValue(env, "LLM_API_KEY", "ARK_API_KEY");
-      return json({ ok: true, configured: Boolean(profile.apiKey && profile.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: [visibleProfile(profile)], runtime: "env-v4", availableBindings: Object.keys(env).sort(), apiKeyBindingDetected: Object.keys(env).some((key) => ["LLM_API_KEY", "ARK_API_KEY"].includes(key.replace(/^\uFEFF/, "").trim().toUpperCase())), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
+      return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v5", availableBindings: Object.keys(env).sort(), apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
     }
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);
-      return json({ ...visible, profiles: [visible], activeProfileId: profile.id, cloudManaged: true });
+      return json({ ...visible, profiles: profiles.map(visibleProfile), activeProfileId: profile.id, cloudManaged: true });
     }
     if (url.pathname === "/api/settings" && request.method === "POST") return json({ error: "模型配置由 Cloudflare 环境变量统一管理" }, 403);
-    if (url.pathname === "/api/chat" && request.method === "POST") return handleChat(request, env);
+    if (url.pathname === "/api/chat" && request.method === "POST") return streamChat(request, env, ctx);
     if (url.pathname.startsWith("/api/")) return json({ error: "接口不存在" }, 404);
     return env.ASSETS.fetch(request);
   },
