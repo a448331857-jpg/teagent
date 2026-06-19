@@ -53,9 +53,11 @@ async function handleChat(request, env) {
   if (!messages.length) return json({ error: "messages 不能为空" }, 400);
   const normalized = messages.map((item) => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 20000) }));
   const instructions = `${SYSTEM_PROMPT}\n\n当前工作台上下文：\n${JSON.stringify(body.context || {}).slice(0, 30000)}`;
+  const taskType = String(body.context?.taskType || "");
+  const maxTokens = taskType === "research-report" ? 6000 : taskType === "target-screening" ? 5000 : 4000;
   const payload = profile.mode === "responses"
-    ? { model: profile.model, instructions, input: normalized }
-    : { model: profile.model, messages: [{ role: "system", content: instructions }, ...normalized] };
+    ? { model: profile.model, instructions, input: normalized, max_output_tokens: maxTokens }
+    : { model: profile.model, messages: [{ role: "system", content: instructions }, ...normalized], max_tokens: maxTokens };
   let upstream;
   try {
     upstream = await fetch(profile.apiUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${profile.apiKey}` }, body: JSON.stringify(payload) });

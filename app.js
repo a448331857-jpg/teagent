@@ -1645,7 +1645,7 @@ async function requestScreeningCandidates(query, filters) {
 筛选要求：${query}
 行业：${filters.sector || "不限"}；轮次：${filters.round || "不限"}；地区：${filters.region || "不限"}；最近融资：${filters.recency}
 请兼顾产业链核心、技术创新、成长性和产业协同，使用紧凑 JSON。严格输出 JSON 数组，不要输出解释。每项字段：name（公司公开全称）、sector、round、region、revenue、intro、financing、tags（数组）、reason、score（0-100）、sourceName（可核验的公开来源名称）、sourceUrl（确知时填写，否则空字符串）。无法确认的融资、营收和轮次必须填写“待核验”，禁止猜测精确数字。`;
-  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000 });
+  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000, minimalContext: true });
   const parsed = parseJsonPayload(answer);
   if (Array.isArray(parsed)) return parsed;
   if (Array.isArray(parsed?.companies)) return parsed.companies;
@@ -1967,17 +1967,25 @@ async function callAgentTask(prompt, context = {}) {
     controller.abort();
   }, timeoutMs);
   try {
-    const response = await fetch(AI_CONFIG.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: makeId(),
-        modelProfileId: selectedModelProfileId,
-        messages: [{ role: "user", content: prompt }],
-        context: { ...buildAgentContext(), ...context },
-      }),
-      signal: controller.signal,
+    const requestBody = JSON.stringify({
+      sessionId: makeId(),
+      modelProfileId: selectedModelProfileId,
+      messages: [{ role: "user", content: prompt }],
+      context: context.minimalContext ? { ...context, minimalContext: undefined } : { ...buildAgentContext(), ...context },
     });
+    let response;
+    let lastNetworkError;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetch(AI_CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: requestBody, signal: controller.signal });
+        break;
+      } catch (error) {
+        lastNetworkError = error;
+        if (timedOut || attempt === 1) throw error;
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+    }
+    if (!response) throw lastNetworkError || new Error("云端模型接口没有响应");
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型没有返回内容");
@@ -2177,7 +2185,7 @@ async function generateResearchReport() {
 参考资料：${sourceText || "暂无附件，请明确标注需要外部核验的数据"}
 
 报告必须包含：执行摘要、核心结论、行业定义与边界、市场空间与驱动因素、产业链、竞争格局、重点公司或标的、商业模式与关键指标、投资机会、主要风险、待核验事项、下一步行动。区分事实、推断和待核验项；不得虚构数据或来源。使用清晰的中文 Markdown 标题和列表。`;
-  const answer = await callAgentTask(prompt, { taskType: "research-report", industry, deliverable, depth });
+  const answer = await callAgentTask(prompt, { taskType: "research-report", industry, deliverable, depth, minimalContext: true, timeoutMs: 600000 });
   const reportHtml = markdownToHtml(answer);
   const local = buildResearchReport();
   const title = `${industry}${deliverable}`;
