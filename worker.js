@@ -49,6 +49,22 @@ async function profileFromEnv(env) {
 }
 
 async function profilesFromEnv(env) {
+  const combined = await resolveValue(env, "LLM_PROFILES");
+  if (combined) {
+    try {
+      const parsed = JSON.parse(combined);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed.slice(0, 3).map((item, index) => ({
+          id: String(item.id || `model-${index + 1}`),
+          name: String(item.name || item.model || `模型 ${index + 1}`).trim(),
+          mode: item.mode === "responses" ? "responses" : "chat-completions",
+          apiUrl: String(item.apiUrl || "https://ark.cn-beijing.volces.com/api/v3/chat/completions").trim(),
+          model: String(item.model || "").trim(),
+          apiKey: cleanApiKey(item.apiKey),
+        }));
+      }
+    } catch {}
+  }
   const numbered = [];
   for (let index = 1; index <= 3; index += 1) {
     const prefix = `LLM_${index}`;
@@ -140,7 +156,7 @@ export default {
         const number = item.id === "default" ? "" : String(index + 1);
         return [!item.model ? `LLM${number ? `_${number}` : ""}_MODEL` : "", !item.apiKey ? `LLM${number ? `_${number}` : ""}_API_KEY` : ""].filter(Boolean);
       });
-      return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v7", availableBindings: Object.keys(env).sort(), missingBindings, apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
+      return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v8", configurationSource: await resolveValue(env, "LLM_PROFILES") ? "LLM_PROFILES" : profiles[0]?.id === "default" ? "single" : "numbered", availableBindings: Object.keys(env).sort(), missingBindings, apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
     }
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);

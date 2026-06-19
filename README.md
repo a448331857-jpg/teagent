@@ -29,6 +29,8 @@
 
 配置多模型时，可以增加加密变量 `LLM_PROFILES`，值为 JSON 数组；其字段为 `id`、`name`、`mode`、`apiUrl`、`model` 和 `apiKey`。设置后会优先使用多模型配置。
 
+`LLM_PROFILES` 是推荐的一键配置方式：一个 Secret 即可保存最多三个模型，优先级高于所有 `LLM_1_*`、`LLM_2_*`、`LLM_3_*` 编号变量。不要把包含 API Key 的 JSON 写入源码或提交到 Git。
+
 `worker.js` 是唯一 Worker 入口，`app.js` 等文件只作为浏览器静态资源发布。本机不需要运行 Node 服务器。
 
 ## 安装到设备
