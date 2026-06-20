@@ -410,6 +410,13 @@ function boot() {
   window.setInterval(checkDueTasks, 60000);
 }
 
+// Mobile browsers occasionally lose a direct click binding after restoring an
+// older PWA page from memory. Delegation keeps the primary navigation usable.
+document.addEventListener("click", (event) => {
+  const navButton = event.target.closest(".nav-item[data-view]");
+  if (navButton) switchView(navButton.dataset.view);
+});
+
 function redirectFileLaunchToServer() {
   if (location.protocol !== "file:") return false;
   document.body.innerHTML = `<main class="launch-redirect"><strong>正在打开已连接大模型的投研 Agent...</strong><p>正确入口：http://127.0.0.1:8787</p></main>`;
@@ -738,6 +745,7 @@ function bindSettings() {
     localStorage.setItem("times-electric-selected-model", selectedModelProfileId);
     const option = $("#askModelSelect").selectedOptions[0];
     setModelStatus(`当前模型 · ${option?.textContent || "未知模型"}`);
+    toast(`已切换到 ${option?.textContent || "所选模型"}。`);
   });
   loadModelSettings();
 }
@@ -1675,9 +1683,11 @@ function bindProjects() {
 function bindHistory() {
   $("#clearHistoryBtn")?.addEventListener("click", () => {
     state.history = [];
+    favoriteFilter = "操作";
+    $$('[data-favorite-filter]').forEach((button) => button.classList.toggle("active", button.dataset.favoriteFilter === "操作"));
     saveState();
-    renderAll();
-    toast("历史已清空。");
+    renderFavorites();
+    toast("操作历史已清空。其他聊天、报告和任务记录仍保留。");
   });
 }
 
