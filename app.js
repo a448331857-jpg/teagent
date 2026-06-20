@@ -711,6 +711,7 @@ function bindLayoutControls() {
 
 function switchView(view) {
   if (view === "history") view = "favorites";
+  if (view === "settings" && window.matchMedia("(max-width: 820px)").matches) view = "ask";
   if (view === "sourcing" && currentView !== "sourcing" && !preserveSourcingResultOnce) {
     state.currentScreeningResults = [];
     renderCompanies();
@@ -2417,7 +2418,7 @@ async function callChatApi() {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
+    if (!response.ok || data.error) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型接口没有返回 message");
     return { message: data.message, usage: normalizeTokenUsage(data.usage) };
   } catch (error) {
@@ -2447,7 +2448,7 @@ async function callAgentTask(prompt, context = {}) {
     }
     if (!response) throw lastNetworkError || new Error("云端模型接口没有响应");
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `模型接口返回 ${response.status}`);
+    if (!response.ok || data.error) throw new Error(data.error || `模型接口返回 ${response.status}`);
     if (!data.message) throw new Error("模型没有返回内容");
     const usage = normalizeTokenUsage(data.usage);
     finishAgentJob(jobId, "success", usage ? `Token：输入 ${usage.input} / 输出 ${usage.output} / 合计 ${usage.total}` : "");

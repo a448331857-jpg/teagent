@@ -1550,6 +1550,11 @@ textarea:focus {
     display: none;
   }
 
+  .nav-item[data-view="settings"],
+  #settingsView {
+    display: none !important;
+  }
+
   .nav {
     display: flex;
     gap: 6px;

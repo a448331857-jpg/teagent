@@ -133,22 +133,37 @@ async function handleChat(request, env) {
   const normalized = messages.map((item) => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 20000) }));
   const instructions = `${SYSTEM_PROMPT}\n\n当前工作台上下文：\n${JSON.stringify(body.context || {}).slice(0, 30000)}`;
   const taskType = String(body.context?.taskType || "");
-  const maxTokens = taskType === "research-report" ? 6000 : taskType === "target-screening" ? 5000 : 4000;
+  const maxTokens = taskType === "research-report" ? 6000 : taskType === "target-screening" ? 3500 : 4000;
   const payload = profile.mode === "responses"
     ? { model: profile.model, instructions, input: normalized, max_output_tokens: maxTokens }
     : { model: profile.model, messages: [{ role: "system", content: instructions }, ...normalized], max_tokens: maxTokens };
   let upstream;
-  try {
-    upstream = await fetch(profile.apiUrl, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${profile.apiKey}` }, body: JSON.stringify(payload) });
-  } catch (error) {
-    return json({ error: `无法连接火山方舟：${error.message || "网络异常"}` }, 502);
+  let data = {};
+  let message = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      upstream = await fetch(profile.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${profile.apiKey}` },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      if (attempt === 0) continue;
+      return json({ error: `无法连接火山方舟：${error.message || "网络异常"}` }, 502);
+    }
+    const rawText = await upstream.text();
+    try { data = JSON.parse(rawText); } catch { data = { rawText }; }
+    if (!upstream.ok) {
+      if (attempt === 0 && upstream.status >= 500) continue;
+      return json({ error: data?.error?.message || data?.message || `火山方舟返回 HTTP ${upstream.status}`, upstreamStatus: upstream.status }, upstream.status);
+    }
+    message = extractModelText(data);
+    if (message) break;
   }
-  const data = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) return json({ error: data?.error?.message || data?.message || `火山方舟返回 HTTP ${upstream.status}`, upstreamStatus: upstream.status }, upstream.status);
-  const message = profile.mode === "responses"
-    ? (data.output_text || (data.output || []).flatMap((item) => item.content || []).map((item) => item.text || "").filter(Boolean).join("\n"))
-    : data?.choices?.[0]?.message?.content;
-  if (!message) return json({ error: "模型服务未返回文本内容" }, 502);
+  if (!message) {
+    const finishReason = data?.choices?.[0]?.finish_reason || data?.status || "";
+    return json({ error: `模型服务未返回文本内容${finishReason ? `（${finishReason}）` : ""}，已自动重试一次` }, 502);
+  }
   const usage = data.usage ? {
     inputTokens: Number(data.usage.prompt_tokens ?? data.usage.input_tokens ?? 0),
     outputTokens: Number(data.usage.completion_tokens ?? data.usage.output_tokens ?? 0),
@@ -156,6 +171,24 @@ async function handleChat(request, env) {
   } : null;
   if (usage && !usage.totalTokens) usage.totalTokens = usage.inputTokens + usage.outputTokens;
   return json({ message, model: data.model || profile.model, endpointId: profile.model, modelProfileId: profile.id, sessionId: body.sessionId || null, usage });
+}
+
+function extractModelText(data) {
+  const direct = data?.output_text
+    || data?.choices?.[0]?.message?.content
+    || data?.choices?.[0]?.text
+    || data?.choices?.[0]?.message?.reasoning_content;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (Array.isArray(direct)) {
+    const text = direct.map((item) => typeof item === "string" ? item : item?.text || item?.content || "").filter(Boolean).join("\n");
+    if (text.trim()) return text.trim();
+  }
+  const outputText = (data?.output || [])
+    .flatMap((item) => item?.content || [])
+    .map((item) => item?.text || item?.content || "")
+    .filter(Boolean)
+    .join("\n");
+  return outputText.trim();
 }
 
 function streamChat(request, env, ctx) {
@@ -166,7 +199,7 @@ function streamChat(request, env, ctx) {
     let completed = false;
     const modelRequest = handleChat(request, env).then((response) => { completed = true; return response; });
     while (!completed) {
-      await Promise.race([modelRequest, new Promise((resolve) => setTimeout(resolve, 15000))]);
+      await Promise.race([modelRequest, new Promise((resolve) => setTimeout(resolve, 10000))]);
       if (!completed) await writer.write(encoder.encode(" \n"));
     }
     const response = await modelRequest;
