@@ -2094,7 +2094,77 @@ html, body, .app-shell, .main, .view, .panel, .table-scroll { max-width: 100%; o
   .project-detail-layout { margin: 0 -18px -18px; }
 }
 @media (max-width: 760px) {
-  body { padding-bottom: env(safe-area-inset-bottom); }
+  html, body {
+    min-height: 100%;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: auto;
+  }
+  body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .app-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .main {
+    height: auto;
+    min-height: calc(100dvh - 78px);
+    overflow: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+  .view.active,
+  #askView.active,
+  #peopleView.active,
+  #boardView.active,
+  #favoritesView.active,
+  #sourcingView.active {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .ask-workspace,
+  #peopleView .people-shell,
+  #peopleView .people-workspace,
+  #peopleView .work-grid,
+  #favoritesView .favorites-workspace,
+  #sourcingView .sourcing-main,
+  .sourcing-shell,
+  .research-shell,
+  .people-shell,
+  .editor-shell,
+  .project-detail-layout {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  #peopleView .people-record-sidebar { overflow: visible; }
+  #peopleRecordList,
+  #favoriteList,
+  #savedScreeningList,
+  #boardKanbanView,
+  #boardTableView,
+  .sourcing-table-scroll {
+    max-height: none;
+    overflow-y: visible;
+  }
+  .chat-messages-full { min-height: 420px; }
+  .modal-backdrop {
+    align-items: start;
+    overflow-y: auto;
+    padding: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-backdrop > .template-modal,
+  #taskModal .compact-modal,
+  #screeningModal .screening-modal,
+  #projectModal .project-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   button, .nav-item, [role="button"] { touch-action: manipulation; }
   .nav { -webkit-overflow-scrolling: touch; }
   .nav-item { position: relative; z-index: 1; }
