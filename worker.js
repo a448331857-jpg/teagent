@@ -23,20 +23,68 @@ function decodeXml(value) {
   return String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
+function parseRssItems(xml, provider) {
+  return [...String(xml).matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(0, 20).map((match) => {
+    const block = match[1];
+    const value = (tag) => decodeXml(block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
+    return { title: value("title").replace(/\s+-\s+[^-]+$/, "").trim(), url: value("link").trim(), snippet: value("description").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), publishedAt: value("pubDate"), sourceType: provider };
+  }).filter((item) => item.title && item.url);
+}
+
 async function handleWebSearch(url) {
   const query = String(url.searchParams.get("q") || "").trim();
   if (!query) return json({ error: "搜索关键词不能为空" }, 400);
-  try {
-    const upstream = await fetch(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`, { headers: { "User-Agent": "Mozilla/5.0 Times-Electric-Research-Agent" } });
-    if (!upstream.ok) throw new Error(`搜索服务返回 ${upstream.status}`);
-    const xml = await upstream.text();
-    const results = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(0, 15).map((match) => {
-      const block = match[1];
-      const value = (tag) => decodeXml(block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"))?.[1] || "");
-      return { title: value("title"), url: value("link"), snippet: value("description").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() };
-    }).filter((item) => item.title && item.url);
-    return json({ query, results });
-  } catch (error) { return json({ error: `联网搜索失败：${error.message || "网络异常"}` }, 502); }
+  const feeds = [
+    { provider: "Bing RSS", url: `https://www.bing.com/search?format=rss&mkt=zh-CN&setlang=zh-Hans&q=${encodeURIComponent(query)}` },
+    { provider: "Google News RSS", url: `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans` },
+  ];
+  const settled = await Promise.allSettled(feeds.map(async (feed) => {
+    const response = await fetch(feed.url, { headers: { "User-Agent": "Mozilla/5.0 Times-Electric-Research-Agent" } });
+    if (!response.ok) throw new Error(`${feed.provider} ${response.status}`);
+    return parseRssItems(await response.text(), feed.provider);
+  }));
+  const results = [...new Map(settled.filter((item) => item.status === "fulfilled").flatMap((item) => item.value).map((item) => [`${item.title}|${item.url}`, item])).values()].slice(0, 30);
+  if (!results.length) return json({ error: "免费 RSS 检索暂时没有返回结果" }, 502);
+  return json({ query, results, providers: feeds.map((feed, index) => ({ name: feed.provider, status: settled[index].status })) });
+}
+
+async function handleAcademicSearch(url) {
+  const query = String(url.searchParams.get("q") || "").trim().slice(0, 160);
+  if (!query) return json({ error: "学术检索关键词不能为空" }, 400);
+  const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&filter=from_publication_date:2021-01-01&per-page=25`;
+  const crossrefUrl = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&filter=from-pub-date:2021-01-01&rows=20`;
+  const [openAlexResult, crossrefResult] = await Promise.allSettled([
+    fetch(openAlexUrl, { headers: { Accept: "application/json", "User-Agent": "Times-Electric-Research-Agent/1.0" } }).then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`OpenAlex ${response.status}`))),
+    fetch(crossrefUrl, { headers: { Accept: "application/json", "User-Agent": "Times-Electric-Research-Agent/1.0 (research-tool)" } }).then(async (response) => response.ok ? response.json() : Promise.reject(new Error(`Crossref ${response.status}`))),
+  ]);
+  const results = [];
+  if (openAlexResult.status === "fulfilled") {
+    for (const work of openAlexResult.value?.results || []) {
+      const workTitle = String(work?.display_name || work?.title || "").trim();
+      const workUrl = work?.doi || work?.id || "";
+      for (const authorship of (work?.authorships || []).slice(0, 8)) {
+        const name = String(authorship?.author?.display_name || "").trim();
+        if (!name || !workUrl) continue;
+        const institution = String(authorship?.institutions?.[0]?.display_name || "").trim();
+        results.push({ title: `${name}${institution ? ` · ${institution}` : ""}｜${workTitle}`, url: workUrl, snippet: `${name}${institution ? `，${institution}` : ""}；${work?.publication_year || ""}年论文：${workTitle}`, personName: name, institution, sourceType: "OpenAlex" });
+      }
+    }
+  }
+  if (crossrefResult.status === "fulfilled") {
+    for (const work of crossrefResult.value?.message?.items || []) {
+      const workTitle = String(work?.title?.[0] || "").trim();
+      const workUrl = work?.URL || (work?.DOI ? `https://doi.org/${work.DOI}` : "");
+      const year = work?.published?.["date-parts"]?.[0]?.[0] || work?.created?.["date-parts"]?.[0]?.[0] || "";
+      for (const author of (work?.author || []).slice(0, 8)) {
+        const name = `${author?.given || ""} ${author?.family || ""}`.trim();
+        if (!name || !workUrl) continue;
+        const institution = String(author?.affiliation?.[0]?.name || "").trim();
+        results.push({ title: `${name}${institution ? ` · ${institution}` : ""}｜${workTitle}`, url: workUrl, snippet: `${name}${institution ? `，${institution}` : ""}；${year ? `${year}年` : ""}论文：${workTitle}`, personName: name, institution, sourceType: "Crossref" });
+      }
+    }
+  }
+  const unique = [...new Map(results.map((item) => [`${item.personName.toLowerCase()}|${item.url}`, item])).values()].slice(0, 60);
+  return json({ query, results: unique, providers: { openAlex: openAlexResult.status, crossref: crossrefResult.status } });
 }
 
 function envValue(env, ...names) {
@@ -131,7 +179,13 @@ async function handleChat(request, env) {
   const messages = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
   if (!messages.length) return json({ error: "messages 不能为空" }, 400);
   const normalized = messages.map((item) => ({ role: item.role === "assistant" ? "assistant" : "user", content: String(item.content || "").slice(0, 20000) }));
-  const instructions = `${SYSTEM_PROMPT}\n\n当前工作台上下文：\n${JSON.stringify(body.context || {}).slice(0, 30000)}`;
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const instructions = `${SYSTEM_PROMPT}
+
+当前日期：${currentDate}。所有报告、判断和时间表必须以当前日期为基准；不得把 2024 年当作当前年份。历史数据应明确标注“历史”，预测数据应明确标注“预测/待核验”。优先采用最新可验证信息。
+
+当前工作台上下文：
+${JSON.stringify(body.context || {}).slice(0, 30000)}`;
   const taskType = String(body.context?.taskType || "");
   const maxTokens = taskType === "research-report" ? 6000 : taskType === "target-screening" ? 3500 : 4000;
   const payload = profile.mode === "responses"
@@ -227,6 +281,7 @@ export default {
       });
       return json({ ok: true, configured: profiles.some((item) => item.apiKey && item.model), model: profile.model, endpointId: profile.model, mode: profile.mode, activeProfileId: profile.id, profiles: profiles.map(visibleProfile), runtime: "env-v8", configurationSource: await resolveValue(env, "LLM_PROFILES") ? "LLM_PROFILES" : profiles[0]?.id === "default" ? "single" : "numbered", availableBindings: Object.keys(env).sort(), missingBindings, apiKeyBindingDetected: profiles.some((item) => Boolean(item.apiKey)), apiKeyDiagnostics: { bindingType: rawKey && typeof rawKey === "object" ? "secret-store" : "text", cleanedLength: profile.apiKey.length, startsWithArk: profile.apiKey.startsWith("ark-"), containsWhitespace: /\s/.test(profile.apiKey), containsAssignment: /LLM_API_KEY|\$env:|=/.test(profile.apiKey) } });
     }
+    if (url.pathname === "/api/academic-search" && request.method === "GET") return handleAcademicSearch(url);
     if (url.pathname === "/api/settings" && request.method === "GET") {
       const visible = visibleProfile(profile);
       return json({ ...visible, profiles: profiles.map(visibleProfile), activeProfileId: profile.id, cloudManaged: true });
