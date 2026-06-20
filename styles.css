@@ -2166,6 +2166,13 @@ html, body, .app-shell, .main, .view, .panel, .table-scroll { max-width: 100%; o
     -webkit-overflow-scrolling: touch;
   }
   button, .nav-item, [role="button"] { touch-action: manipulation; }
+  #askModelSelect {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .ask-session-bar .row-actions { width: 100%; }
   .nav { -webkit-overflow-scrolling: touch; }
   .nav-item { position: relative; z-index: 1; }
 }

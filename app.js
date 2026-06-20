@@ -740,18 +740,30 @@ function bindSettings() {
     $("#settingsModelStatus").textContent = "新模型配置";
   });
   $("#deleteModelProfileBtn").addEventListener("click", deleteCurrentModelProfile);
-  $("#askModelSelect").addEventListener("change", () => {
-    selectedModelProfileId = $("#askModelSelect").value;
-    localStorage.setItem("times-electric-selected-model", selectedModelProfileId);
-    const option = $("#askModelSelect").selectedOptions[0];
-    setModelStatus(`当前模型 · ${option?.textContent || "未知模型"}`);
-    toast(`已切换到 ${option?.textContent || "所选模型"}。`);
-  });
+  const askModelSelect = $("#askModelSelect");
+  ["input", "change"].forEach((eventName) => askModelSelect.addEventListener(eventName, syncAskModelSelection));
   loadModelSettings();
 }
 
 let availableModelProfiles = [];
 let cloudManagedSettings = true;
+
+function syncAskModelSelection() {
+  const select = $("#askModelSelect");
+  const nextId = select?.value || "";
+  if (!nextId) return selectedModelProfileId;
+  const changed = nextId !== selectedModelProfileId;
+  selectedModelProfileId = nextId;
+  localStorage.setItem("times-electric-selected-model", nextId);
+  const option = select.selectedOptions?.[0];
+  setModelStatus(`当前模型 · ${option?.textContent || "未知模型"}`);
+  if (changed) toast(`已切换到 ${option?.textContent || "所选模型"}。`);
+  return nextId;
+}
+
+function currentAskModelProfileId() {
+  return syncAskModelSelection() || selectedModelProfileId;
+}
 
 function loadModelProfile(profileId) {
   const profile = availableModelProfiles.find((item) => item.id === profileId);
@@ -2395,7 +2407,7 @@ async function callChatApi() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: state.chatSessionId,
-        modelProfileId: selectedModelProfileId,
+        modelProfileId: currentAskModelProfileId(),
         messages: state.chatMessages
           .filter((message) => !message.pending)
           .slice(-24)
@@ -2426,7 +2438,7 @@ async function callAgentTask(prompt, context = {}) {
     controller.abort();
   }, timeoutMs);
   try {
-    const requestBody = JSON.stringify({ sessionId: makeId(), modelProfileId: selectedModelProfileId, messages: [{ role: "user", content: prompt }], context: context.minimalContext ? { ...context, minimalContext: undefined } : { ...buildAgentContext(), ...context } });
+    const requestBody = JSON.stringify({ sessionId: makeId(), modelProfileId: currentAskModelProfileId(), messages: [{ role: "user", content: prompt }], context: context.minimalContext ? { ...context, minimalContext: undefined } : { ...buildAgentContext(), ...context } });
     let response;
     let lastNetworkError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
