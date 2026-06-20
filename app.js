@@ -732,7 +732,12 @@ function switchView(view) {
 function bindSettings() {
   $("#saveModelSettingsBtn").addEventListener("click", saveModelSettings);
   $("#testModelSettingsBtn").addEventListener("click", testModelSettings);
-  $("#settingsProfileSelect").addEventListener("change", () => loadModelProfile($("#settingsProfileSelect").value));
+  $("#settingsProfileSelect").addEventListener("change", () => {
+    const profileId = $("#settingsProfileSelect").value;
+    if (!profileId) return loadModelProfile(profileId);
+    $("#askModelSelect").value = profileId;
+    syncAskModelSelection();
+  });
   $("#newModelProfileBtn").addEventListener("click", () => {
     $("#settingsProfileSelect").value = "";
     $("#settingsProfileName").value = "";
@@ -756,6 +761,9 @@ function syncAskModelSelection() {
   const changed = nextId !== selectedModelProfileId;
   selectedModelProfileId = nextId;
   localStorage.setItem("times-electric-selected-model", nextId);
+  const settingsSelect = $("#settingsProfileSelect");
+  if (settingsSelect && settingsSelect.value !== nextId) settingsSelect.value = nextId;
+  if (availableModelProfiles.length) loadModelProfile(nextId);
   const option = select.selectedOptions?.[0];
   setModelStatus(`当前模型 · ${option?.textContent || "未知模型"}`);
   if (changed) toast(`已切换到 ${option?.textContent || "所选模型"}。`);
@@ -792,11 +800,11 @@ async function loadModelSettings() {
     const activeId = selectedModelProfileId && availableModelProfiles.some((item) => item.id === selectedModelProfileId) ? selectedModelProfileId : settings.activeProfileId || availableModelProfiles[0]?.id;
     selectedModelProfileId = activeId || "";
     localStorage.setItem("times-electric-selected-model", selectedModelProfileId);
-    $("#settingsProfileSelect").value = settings.activeProfileId || activeId;
+    $("#settingsProfileSelect").value = activeId;
     $("#askModelSelect").value = selectedModelProfileId;
-    loadModelProfile($("#settingsProfileSelect").value);
+    loadModelProfile(activeId);
     if (cloudManagedSettings) {
-      ["#settingsProfileSelect", "#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"].forEach((selector) => { const element = $(selector); if (element) element.disabled = true; });
+      ["#settingsProfileName", "#settingsMode", "#settingsApiUrl", "#settingsModel", "#settingsApiKey", "#newModelProfileBtn", "#deleteModelProfileBtn", "#saveModelSettingsBtn"].forEach((selector) => { const element = $(selector); if (element) element.disabled = true; });
       $("#saveModelSettingsBtn").textContent = "云端统一管理";
     }
   } catch (error) {
