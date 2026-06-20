@@ -507,7 +507,6 @@ function getJobLabel(context = {}) {
   const labels = {
     "research-report": "生成投研报告",
     "target-screening": "标的搜集 · 最多100条",
-    "target-search-planning": "规划标的检索词",
     "skill-generation": "生成智能体 Skill",
     "people-research": "联网人物调查",
     "scheduled-research": context.taskName ? `执行：${context.taskName}` : "执行定时任务",
@@ -1065,7 +1064,7 @@ function bindPeople() {
           ? [`"${direction}" 创始人 CEO 融资 -招聘`, `"${direction}" 教授 专家 课题组 论文 -招聘`, `"${direction}" 投资人 演讲 峰会 -招聘`, `"${direction}" 专利 技术负责人`, `"${direction}" site:edu.cn OR site:gov.cn`, `"${direction}" 行业协会 专家委员会`]
         : [`${name} ${company} 人物 履历 任职`, `${name} ${company} 创始人 CEO 新闻`, `${name} ${company} 访谈 演讲`, `${name} ${company} 工商 股东`, `${name} 论文 专利 学位`, `${name} ${company} 诉讼 处罚 风险`, ...personAliases.flatMap((alias) => [`${alias} ${company} biography`, `${alias} ${company} profile`])];
       const requiredPersonName = peopleMode === "person" ? name : looksLikeName ? direction : "";
-      const sources = await searchPeopleSources(queries, requiredPersonName, peopleMode === "person", personAliases, peopleMode === "direction" ? direction : `${name} ${company}`);
+      const sources = await searchPeopleSources(queries, requiredPersonName, peopleMode === "person", personAliases);
       const sourceText = sources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n");
       const prompt = peopleMode === "direction"
         ? `你是一级市场投资机构的首席人才研究分析师。${looksLikeName ? `“${direction}”看起来是姓名：先完成同名人物消歧，严禁把不同人的经历、机构和成果合并。` : `围绕“${direction}”建立可用于投资发现的人物图谱。`}
@@ -1099,8 +1098,7 @@ ${sourceText}`;
       const title = peopleMode === "direction" ? `${direction} 人才搜集` : `${company || ""}-${name}人物调查`;
       let resultHtml;
       if (peopleMode === "direction") {
-        const discovery = parseJsonPayload(answer);
-        resultHtml = renderPeopleDiscovery(discovery, sources);
+        try { resultHtml = renderPeopleDiscovery(parseJsonPayload(answer), sources); } catch { resultHtml = markdownToHtml(answer); }
       } else {
         resultHtml = markdownToHtml(answer);
       }
@@ -1193,51 +1191,15 @@ function getPersonAliases(name) {
   return aliases[String(name || "").replace(/[·\s]/g, "")] || [];
 }
 
-function buildPeopleTopicTerms(topic) {
-  const value = String(topic || "").trim().toLowerCase();
-  const cleaned = value
-    .replace(/[“”"'（）()]/g, " ")
-    .replace(/技术专家|行业专家|产业专家|专家人物|人物图谱|核心人才|领军人才|寻找|搜索|调研|方向|领域|产业|行业/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const terms = [cleaned, ...cleaned.split(/\s+/)].filter((item) => item.length >= 2);
-  const aliases = {
-    光伏: ["光伏", "太阳能", "solar", "photovoltaic", "pv"],
-    半导体: ["半导体", "芯片", "semiconductor", "chip"],
-    人工智能: ["人工智能", "ai", "machine learning"],
-    机器人: ["机器人", "robot", "robotics"],
-    新能源: ["新能源", "new energy", "clean energy"],
-    电池: ["电池", "battery"],
-  };
-  Object.entries(aliases).forEach(([key, values]) => {
-    if (value.includes(key)) terms.push(...values);
-  });
-  return [...new Set(terms.map((item) => item.toLowerCase()).filter(Boolean))];
-}
-
-function peopleSourceRelevance(item, topicTerms, requiredName = "") {
-  const text = `${item.title || ""} ${item.snippet || ""} ${item.url || ""}`.toLowerCase();
-  if (requiredName && !text.includes(requiredName.toLowerCase())) return 0;
-  const matched = topicTerms.filter((term) => text.includes(term));
-  const professional = /教授|研究员|院士|博士|创始人|董事长|总经理|首席|专家|学者|实验室|研究院|大学|协会|专利|论文|professor|researcher|founder|scientist|engineer/.test(text);
-  const noise = /dance|tiktok|youtube|娱乐|舞蹈|游戏|招聘|课程广告|购物/.test(text);
-  return (matched.length * 3) + (professional ? 2 : 0) - (noise ? 8 : 0);
-}
-
-async function searchPeopleSources(queries, requiredName = "", personOnly = false, aliases = [], topic = "") {
-  const academicRequest = fetch(apiUrl(`/api/academic-search?q=${encodeURIComponent(topic || requiredName || queries[0] || "")}`), { cache: "no-store" })
-    .then(async (response) => response.ok ? (await response.json()).results || [] : [])
-    .catch(() => []);
+async function searchPeopleSources(queries, requiredName = "", personOnly = false, aliases = []) {
   const responses = await Promise.allSettled(queries.map(async (query) => {
     const response = await fetch(apiUrl(`/api/web-search?q=${encodeURIComponent(query)}`), { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "联网搜索失败");
     return data.results || [];
   }));
-  const academicRows = await academicRequest;
-  const rows = [...academicRows, ...responses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value)];
+  const rows = responses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value);
   let unique = [...new Map(rows.map((item) => [item.url, item])).values()];
-  const topicTerms = buildPeopleTopicTerms(topic || requiredName);
   if (requiredName) {
     const identityTerms = [requiredName, ...aliases].filter(Boolean);
     const exact = unique.filter((item) => identityTerms.some((term) => `${item.title} ${item.snippet}`.toLowerCase().includes(term.toLowerCase())));
@@ -1251,22 +1213,13 @@ async function searchPeopleSources(queries, requiredName = "", personOnly = fals
       return !excluded.test(text) && (humanSignals.test(text) || text.includes(requiredName));
     });
   }
-  unique = unique
-    .map((item) => ({ ...item, relevance: peopleSourceRelevance(item, topicTerms) }))
-    .filter((item) => item.relevance >= 3)
-    .sort((a, b) => b.relevance - a.relevance)
-    .slice(0, 24)
-    .map(({ relevance, ...item }) => item);
-  if (unique.length < 3) throw new Error("联网搜索没有找到至少 3 条与目标领域直接相关的可靠来源，已停止生成空报告。请补充更具体的技术方向、机构或人物名称");
+  unique = unique.slice(0, 24);
+  if (!unique.length) throw new Error("联网搜索没有找到可用来源，请调整关键词");
   return unique;
 }
 
 function renderPeopleDiscovery(data, sources) {
-  const groups = (Array.isArray(data?.groups) ? data.groups : [])
-    .map((group) => ({ ...group, people: (Array.isArray(group.people) ? group.people : []).filter((person) => person?.name && Array.isArray(person.sourceIds) && person.sourceIds.some((id) => sources[Number(id) - 1])) }))
-    .filter((group) => group.people.length);
-  const peopleCount = groups.reduce((total, group) => total + group.people.length, 0);
-  if (!peopleCount) throw new Error("模型没有返回任何带有效来源编号的人物，已停止生成空报告");
+  const groups = Array.isArray(data?.groups) ? data.groups : [];
   const groupHtml = groups.map((group) => {
     const people = Array.isArray(group.people) ? group.people : [];
     const rows = people.map((person) => {
@@ -2014,12 +1967,7 @@ async function runTargetScreening() {
     button.textContent = "正在搜集候选标的...";
     const rows = await requestScreeningCandidates(query, filters);
     const uniqueRows = dedupeScreeningRows(rows).slice(0, 100);
-    state.currentScreeningResults = uniqueRows.map((item) => ({
-      ...normalizeScreeningCompany(item, filters),
-      sourceName: item.sourceName,
-      sourceUrl: item.sourceUrl,
-      verificationStatus: item.verificationStatus || "公司名称与来源匹配",
-    }));
+    state.currentScreeningResults = uniqueRows.map((item) => normalizeScreeningCompany(item, filters));
     if (!state.currentScreeningResults.length) throw new Error("没有找到符合结构化条件的候选公司，请放宽筛选条件");
     const savedScreening = { id: makeId(), query, filters, results: state.currentScreeningResults, createdAt: new Date().toISOString() };
     state.screenings.unshift(savedScreening);
@@ -2052,68 +2000,7 @@ async function runTargetScreening() {
   }
 }
 
-async function planTargetSearchQueries(query, filters) {
-  const prompt = `你是企业情报检索规划助手。根据筛选要求生成6条用于寻找真实公司、融资新闻、政府公示、投资机构项目和公司官网的中文搜索词。
-要求：${query}
-行业：${filters.sector || "不限"}；地区：${filters.region || "不限"}；轮次：${filters.round || "不限"}
-查询词应覆盖：公司官网、融资新闻、投资机构 portfolio、政府/园区项目公示、产品或技术发布。严格返回JSON字符串数组，不要解释。`;
-  try {
-    const answer = await callAgentTask(prompt, { taskType: "target-search-planning", timeoutMs: 180000, minimalContext: true });
-    const parsed = parseJsonPayload(answer);
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item.trim()).slice(0, 6) : [];
-  } catch {
-    return [];
-  }
-}
-
-function companyMatchesSource(companyName, source) {
-  const normalizedName = String(companyName || "").toLowerCase().replace(/[（）()\s]/g, "").replace(/股份有限公司|有限责任公司|有限公司|集团/g, "");
-  const sourceText = `${source?.title || ""} ${source?.snippet || ""}`.toLowerCase().replace(/[（）()\s]/g, "");
-  return normalizedName.length >= 2 && sourceText.includes(normalizedName);
-}
-
 async function requestScreeningCandidates(query, filters) {
-  const plannedQueries = await planTargetSearchQueries(query, filters);
-  const fallbackQueries = [
-    `${query} ${filters.sector || ""} 公司 融资`,
-    `${query} ${filters.region || ""} 企业 项目`,
-    `${filters.sector || query} 创业公司 投资`,
-    `${query} 公司 官网 产品`,
-    `${query} 投资机构 portfolio 项目`,
-    `${query} 政府 园区 企业 公示`,
-  ];
-  const rssQueries = [...new Set([...plannedQueries, ...fallbackQueries])].slice(0, 10);
-  const rssResponses = await Promise.allSettled(rssQueries.map(async (rssQuery) => {
-    const response = await fetch(apiUrl(`/api/web-search?q=${encodeURIComponent(rssQuery)}`), { cache: "no-store" });
-    const data = await response.json().catch(() => ({}));
-    return response.ok ? data.results || [] : [];
-  }));
-  const rssSources = [...new Map(rssResponses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value).map((item) => [item.url, item])).values()].slice(0, 40);
-  if (rssSources.length < 3) throw new Error("免费 RSS 没有找到至少 3 条相关企业或融资来源，已停止生成未经核验的标的");
-  const rssText = rssSources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}\n来源：${item.sourceType || "RSS"}`).join("\n\n");
-  const prompt = `你是严谨的一级市场标的筛选分析师。只能从下方 RSS 联网来源中识别真实存在的候选公司，不得使用模型记忆补充未在来源中出现的公司。最多返回100家，实际找到多少就返回多少，不得凑数、虚构或使用占位名称。
-筛选要求：${query}
-行业：${filters.sector || "不限"}；轮次：${filters.round || "不限"}；地区：${filters.region || "不限"}；最近融资：${filters.recency}
-严格输出JSON数组，不要解释。每项字段：name、sector、round、region、registeredLocation、intro、financingAmount、investors、financingDate、reason、score、sourceId。sourceId必须对应下方来源编号；没有有效来源编号的公司不得输出。无法确认的字段填写“待核验”，禁止猜测精确数字。
-
-RSS联网来源：
-${rssText}`;
-  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000, minimalContext: true });
-  let parsed;
-  try { parsed = parseJsonPayload(answer); } catch { parsed = recoverJsonArray(answer); }
-  const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.companies) ? parsed.companies : Array.isArray(parsed?.results) ? parsed.results : null;
-  if (!rows) throw new Error("模型返回格式不正确，请重新执行筛选");
-  const verified = rows.map((item) => {
-    const source = rssSources[Number(item?.sourceId) - 1];
-    return source && companyMatchesSource(item?.name, source)
-      ? { ...item, sourceName: source.sourceType || "RSS", sourceUrl: source.url, verificationStatus: "公司名称与来源匹配" }
-      : null;
-  }).filter(Boolean);
-  if (!verified.length) throw new Error("候选公司名称未出现在对应网页来源中，已全部删除，未生成未经核验的标的");
-  return verified;
-}
-
-async function requestScreeningCandidatesLegacy(query, filters) {
   const prompt = `你是严谨的一级市场标的筛选分析师。请返回符合条件且真实存在、名称可公开检索的候选公司，最多100家。按实际可靠结果返回，不得为了凑数补足，不得虚构公司，不得使用“某公司”等占位名称，不得重复。
 筛选要求：${query}
 行业：${filters.sector || "不限"}；轮次：${filters.round || "不限"}；地区：${filters.region || "不限"}；最近融资：${filters.recency}
