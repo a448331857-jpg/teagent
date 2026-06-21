@@ -4,9 +4,6 @@
   "main": "cloud-worker.js",
   "compatibility_date": "2026-06-18",
   "keep_vars": true,
-  "vars": {
-    "RSS_BASE_URL": "https://rss.teagent.qzz.io"
-  },
   "assets": {
     "directory": ".",
     "binding": "ASSETS",
