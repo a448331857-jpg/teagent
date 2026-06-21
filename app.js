@@ -1072,7 +1072,9 @@ function bindPeople() {
           ? [`"${direction}" 创始人 CEO 融资 -招聘`, `"${direction}" 教授 专家 课题组 论文 -招聘`, `"${direction}" 投资人 演讲 峰会 -招聘`, `"${direction}" 专利 技术负责人`, `"${direction}" site:edu.cn OR site:gov.cn`, `"${direction}" 行业协会 专家委员会`]
         : [`${name} ${company} 人物 履历 任职`, `${name} ${company} 创始人 CEO 新闻`, `${name} ${company} 访谈 演讲`, `${name} ${company} 工商 股东`, `${name} 论文 专利 学位`, `${name} ${company} 诉讼 处罚 风险`, ...personAliases.flatMap((alias) => [`${alias} ${company} biography`, `${alias} ${company} profile`])];
       const requiredPersonName = peopleMode === "person" ? name : looksLikeName ? direction : "";
-      const sources = await searchPeopleSources(queries, requiredPersonName, peopleMode === "person", personAliases);
+      const webSources = await searchPeopleSourcesAdvanced(queries, requiredPersonName, peopleMode === "person", personAliases, query);
+      const privateRssSources = await fetchRelevantPrivateRss(query, ["jiemian", "aicaijing", "ifeng_stock", "36kr", "weibo", "zhihu", "wechat", "xueqiu"], requiredPersonName);
+      const sources = [...new Map([...privateRssSources, ...webSources].map((item) => [item.url, item])).values()].slice(0, 30);
       const sourceText = sources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n");
       const prompt = peopleMode === "direction"
         ? `你是一级市场投资机构的首席人才研究分析师。${looksLikeName ? `“${direction}”看起来是姓名：先完成同名人物消歧，严禁把不同人的经历、机构和成果合并。` : `围绕“${direction}”建立可用于投资发现的人物图谱。`}
@@ -1228,6 +1230,33 @@ function peopleSourceRelevance(item, topicTerms, requiredName = "") {
   const professional = /教授|研究员|院士|博士|创始人|董事长|总经理|首席|专家|学者|实验室|研究院|大学|协会|专利|论文|professor|researcher|founder|scientist|engineer/.test(text);
   const noise = /dance|tiktok|youtube|娱乐|舞蹈|游戏|招聘|课程广告|购物/.test(text);
   return (matched.length * 3) + (professional ? 2 : 0) - (noise ? 8 : 0);
+}
+
+async function fetchRelevantPrivateRss(query, routes, requiredExact = "") {
+  const routeList = Array.isArray(routes) ? routes.filter(Boolean).join(",") : "";
+  const response = await fetch(apiUrl(`/api/rss/bundle?routes=${encodeURIComponent(routeList)}`), { cache: "no-store" }).catch(() => null);
+  if (!response?.ok) return [];
+  const data = await response.json().catch(() => ({}));
+  const terms = buildPeopleTopicTerms(query);
+  const exact = String(requiredExact || "").trim().toLowerCase();
+  return (Array.isArray(data.items) ? data.items : [])
+    .map((item) => {
+      const text = `${item.title || ""} ${item.snippet || ""}`.toLowerCase();
+      const matchedTerms = terms.filter((term) => text.includes(term));
+      const exactMatch = exact && text.includes(exact);
+      return {
+        title: item.title,
+        url: item.url,
+        snippet: item.snippet || "",
+        publishedAt: item.publishedAt || "",
+        sourceType: `RSSHub/${item.sourceName || "feed"}`,
+        relevance: (exactMatch ? 10 : 0) + matchedTerms.length * 3,
+      };
+    })
+    .filter((item) => item.url && item.title && item.relevance >= (exact ? 10 : 3))
+    .sort((a, b) => b.relevance - a.relevance)
+    .slice(0, 20)
+    .map(({ relevance, ...item }) => item);
 }
 
 async function searchPeopleSources(queries, requiredName = "", personOnly = false, aliases = []) {
@@ -2044,7 +2073,7 @@ async function runTargetScreening() {
   const filters = { sector: $("#sectorFilter").value, round: $("#roundFilter").value, region: $("#regionFilter").value, recency: $("#recencyFilter").value };
   try {
     button.textContent = "正在搜集候选标的...";
-    const rows = await requestScreeningCandidates(query, filters);
+    const rows = await requestScreeningCandidatesRss(query, filters);
     const uniqueRows = dedupeScreeningRows(rows).slice(0, 100);
     state.currentScreeningResults = uniqueRows.map((item) => normalizeScreeningCompany(item, filters));
     if (!state.currentScreeningResults.length) throw new Error("没有找到符合结构化条件的候选公司，请放宽筛选条件");
@@ -2115,7 +2144,8 @@ async function requestScreeningCandidatesRss(query, filters) {
     const data = await response.json().catch(() => ({}));
     return response.ok ? data.results || [] : [];
   }));
-  const rssSources = [...new Map(rssResponses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value).map((item) => [item.url, item])).values()].slice(0, 40);
+  const privateRssSources = await fetchRelevantPrivateRss(query, ["reports_10jqka", "reports_eastmoney", "jiemian", "aicaijing", "ifeng_stock", "36kr", "wechat", "xueqiu"]);
+  const rssSources = [...new Map([...privateRssSources, ...rssResponses.filter((item) => item.status === "fulfilled").flatMap((item) => item.value)].map((item) => [item.url, item])).values()].slice(0, 40);
   if (rssSources.length < 3) throw new Error("免费 RSS 没有找到至少 3 条相关企业或融资来源，已停止生成未经核验的标的");
   const rssText = rssSources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}\n来源：${item.sourceType || "RSS"}`).join("\n\n");
   const prompt = `你是严谨的一级市场标的筛选分析师。只能从下方 RSS 联网来源中识别真实存在的候选公司，不得使用模型记忆补充未在来源中出现的公司。最多返回100家，实际找到多少就返回多少，不得凑数、虚构或使用占位名称。
@@ -2790,7 +2820,9 @@ async function generateResearchReport() {
   const searchQueries = researchMode === "deep"
     ? [`${industry} 行业政策 监管`, `${industry} 市场规模 增长率`, `${industry} 产业链 核心环节`, `${industry} 竞争格局 头部公司`, `${industry} 投资 风险 融资`]
     : [`${industry} 行业研究 市场 产业链`, `${industry} 投融资 竞争格局`];
-  const webSources = await searchPeopleSources(searchQueries);
+  const searchedSources = await searchPeopleSourcesAdvanced(searchQueries, "", false, [], industry);
+  const privateRssSources = await fetchRelevantPrivateRss(`${industry} ${requirement}`, ["policy", "pbc", "reports_10jqka", "reports_eastmoney", "jiemian", "aicaijing", "ifeng_stock", "36kr", "wechat", "xueqiu"]);
+  const webSources = [...new Map([...privateRssSources, ...searchedSources].map((item) => [item.url, item])).values()].slice(0, researchMode === "deep" ? 40 : 24);
   const webText = webSources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n").slice(0, researchMode === "deep" ? 50000 : 24000);
   const prompt = `你是时代电气投研助手。请根据以下要求生成一份专业、完整、可提交给投资管理者的${deliverable}。
 报告基准日期：${reportDate}。所有“当前、最新、近期”判断必须以该日期为准，不得把 2024 年当作当前年份；历史数据和预测数据必须明确区分。
