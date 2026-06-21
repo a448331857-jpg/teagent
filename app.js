@@ -1074,8 +1074,10 @@ function bindPeople() {
       const requiredPersonName = peopleMode === "person" ? name : looksLikeName ? direction : "";
       const webSources = await searchPeopleSourcesAdvanced(queries, requiredPersonName, peopleMode === "person", personAliases, query);
       const privateRssSources = await fetchRelevantPrivateRss(query, ["jiemian", "aicaijing", "ifeng_stock", "36kr", "weibo", "zhihu", "wechat", "xueqiu"], requiredPersonName);
-      const sources = [...new Map([...privateRssSources, ...webSources].map((item) => [item.url, item])).values()].slice(0, 30);
-      const sourceText = sources.map((item, index) => `[${index + 1}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n");
+      const sources = [...new Map([...privateRssSources, ...webSources].map((item) => [item.url, item])).values()]
+        .sort((a, b) => Number(isPeopleNewsSource(b)) - Number(isPeopleNewsSource(a)))
+        .slice(0, 30);
+      const sourceText = `Source policy: build the main narrative and timeline from directly relevant news first. Use official profiles, academic, corporate and registry materials only as supporting evidence. Search snippets are leads, not final facts. If sources conflict, show the conflict and mark it for verification.\n\n${sources.map((item, index) => `[${index + 1}] [${isPeopleNewsSource(item) ? "NEWS" : "SUPPORT"}] ${item.title}\n${item.snippet}\n${item.url}`).join("\n\n")}`;
       const prompt = peopleMode === "direction"
         ? `你是一级市场投资机构的首席人才研究分析师。${looksLikeName ? `“${direction}”看起来是姓名：先完成同名人物消歧，严禁把不同人的经历、机构和成果合并。` : `围绕“${direction}”建立可用于投资发现的人物图谱。`}
 自动执行以下深度调查要求：
@@ -1104,7 +1106,7 @@ ${sourceText}`
 联网来源：
 ${sourceText}`;
       const answer = await callAgentTask(prompt, { taskType: "people-research", peopleMode, query });
-      const sourceHtml = `<h3>联网来源</h3><ol>${sources.map((item) => `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a><p>${escapeHtml(item.snippet)}</p></li>`).join("")}</ol>`;
+      const sourceHtml = `<h3>联网来源（新闻为主，资料为辅）</h3><ol>${sources.map((item) => `<li><strong>${isPeopleNewsSource(item) ? "新闻" : "辅助资料"}</strong> · <a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a><p>${escapeHtml(item.snippet)}</p></li>`).join("")}</ol>`;
       const title = peopleMode === "direction" ? `${direction} 人才搜集` : `${company || ""}-${name}人物调查`;
       let resultHtml;
       if (peopleMode === "direction") {
@@ -1230,6 +1232,11 @@ function peopleSourceRelevance(item, topicTerms, requiredName = "") {
   const professional = /教授|研究员|院士|博士|创始人|董事长|总经理|首席|专家|学者|实验室|研究院|大学|协会|专利|论文|professor|researcher|founder|scientist|engineer/.test(text);
   const noise = /dance|tiktok|youtube|娱乐|舞蹈|游戏|招聘|课程广告|购物/.test(text);
   return (matched.length * 3) + (professional ? 2 : 0) - (noise ? 8 : 0);
+}
+
+function isPeopleNewsSource(item) {
+  const text = `${item?.sourceType || ""} ${item?.title || ""} ${item?.url || ""}`.toLowerCase();
+  return /rsshub|news|36kr|jiemian|weibo|wechat|xueqiu|zhihu|ifeng|sina|qq\.com|163\.com|thepaper|caixin|eastmoney/.test(text);
 }
 
 async function fetchRelevantPrivateRss(query, routes, requiredExact = "") {
@@ -2073,7 +2080,7 @@ async function runTargetScreening() {
   const filters = { sector: $("#sectorFilter").value, round: $("#roundFilter").value, region: $("#regionFilter").value, recency: $("#recencyFilter").value };
   try {
     button.textContent = "正在搜集候选标的...";
-    const rows = await requestScreeningCandidatesRss(query, filters);
+    const rows = await requestScreeningCandidates(query, filters);
     const uniqueRows = dedupeScreeningRows(rows).slice(0, 100);
     state.currentScreeningResults = uniqueRows.map((item) => normalizeScreeningCompany(item, filters));
     if (!state.currentScreeningResults.length) throw new Error("没有找到符合结构化条件的候选公司，请放宽筛选条件");
@@ -2155,7 +2162,7 @@ async function requestScreeningCandidatesRss(query, filters) {
 
 RSS联网来源：
 ${rssText}`;
-  const answer = await callAgentTask(prompt, { taskType: "target-screening", filters, timeoutMs: 600000, minimalContext: true });
+  const answer = await callAgentTask(prompt, { taskType: "target-screening", query, filters, timeoutMs: 600000, minimalContext: true });
   let parsed;
   try { parsed = parseJsonPayload(answer); } catch { parsed = recoverJsonArray(answer); }
   const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.companies) ? parsed.companies : Array.isArray(parsed?.results) ? parsed.results : null;
